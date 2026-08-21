@@ -33,8 +33,8 @@ Download the supported RoboTwin asset snapshot and set its location:
 
 .. code-block:: bash
 
-   robotwin-download-assets --output /path/to/robotwin-assets
-   export ROBOTWIN_ASSETS_ROOT=/path/to/robotwin-assets
+   robotwin-download-assets --output ~/.robotwin/assets
+   export ROBOTWIN_ASSETS_PATH=~/.robotwin/assets
 
 The downloader validates existing files and skips the download when the target
 directory already contains a complete RoboTwin asset set.
@@ -95,7 +95,7 @@ Common options
 - ``--task-config`` selects the RoboTwin environment configuration. Supported
   values are ``demo_clean`` and ``demo_randomized``; the default is
   ``demo_randomized``.
-- ``--robotwin-assets-root`` overrides ``ROBOTWIN_ASSETS_ROOT``.
+- ``--robotwin-assets-path`` overrides ``ROBOTWIN_ASSETS_PATH``.
 - ``--vla-model-path`` overrides ``LINGBOT_MODEL_PATH``.
 - ``--cuda-device`` runs the simulator and VLA on the same GPU.
 - ``--env-cuda-device`` and ``--vla-cuda-device`` place the simulator and VLA

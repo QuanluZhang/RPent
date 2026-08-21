@@ -215,7 +215,7 @@ def build_env_cfg(
     task_name: str,
     task_config: str,
     seed: int,
-    assets_root: str,
+    assets_path: str,
 ) -> Any:
     """Build a single-env RLinf config from packaged RoboTwin resources."""
     native_task_config = OmegaConf.create(load_task_config(task_config))
@@ -250,7 +250,7 @@ def build_env_cfg(
             "max_steps_per_rollout_epoch": step_limit,
             "max_episode_steps": step_limit,
             "is_eval": True,
-            "assets_path": assets_root,
+            "assets_path": assets_path,
             "seeds_path": None,
             "video_cfg": {
                 "save_video": False,
@@ -267,12 +267,12 @@ def make_env(
     task_name: str,
     task_config: str,
     seed: int,
-    assets_root: str,
+    assets_path: str,
 ) -> RoboTwinAgentEnv:
     """Construct the only simulator owner used by an RPent run."""
-    assets_identity = validate_root(assets_root)
-    assets_path = Path(assets_identity["root"])
-    os.environ["ROBOTWIN_ASSETS_ROOT"] = str(assets_path)
+    assets_identity = validate_root(assets_path)
+    resolved_assets_path = Path(assets_identity["root"])
+    os.environ["ROBOTWIN_ASSETS_PATH"] = str(resolved_assets_path)
     logger.info("RoboTwin assets: %s", assets_identity)
     print(
         f"robotwin_assets {json.dumps(assets_identity, sort_keys=True)}",
@@ -282,7 +282,7 @@ def make_env(
         task_name=task_name,
         task_config=task_config,
         seed=seed,
-        assets_root=str(assets_path),
+        assets_path=str(resolved_assets_path),
     )
     return RoboTwinAgentEnv(
         cfg=cfg,
@@ -308,7 +308,7 @@ def main() -> None:
         required=True,
     )
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--assets-root", required=True)
+    parser.add_argument("--assets-path", required=True)
     parser.add_argument("--parent-watch", action="store_true")
     args = parser.parse_args()
 
@@ -316,7 +316,7 @@ def main() -> None:
         args.task_name,
         args.task_config,
         args.seed,
-        args.assets_root,
+        args.assets_path,
     )
     from robots.robotwin.env_spec import env_runtime_contract
 

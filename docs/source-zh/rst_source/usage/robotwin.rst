@@ -32,8 +32,8 @@ RoboTwin
 
 .. code-block:: bash
 
-   robotwin-download-assets --output /path/to/robotwin-assets
-   export ROBOTWIN_ASSETS_ROOT=/path/to/robotwin-assets
+   robotwin-download-assets --output ~/.robotwin/assets
+   export ROBOTWIN_ASSETS_PATH=~/.robotwin/assets
 
 下载工具会先校验已有文件；如果目标目录中的 RoboTwin 资源已经完整，
 则不会重复下载。
@@ -92,7 +92,7 @@ Dashboard 启动后，访问地址会显示在终端中。
 
 - ``--task-config``：选择 RoboTwin 环境配置，支持 ``demo_clean`` 和
   ``demo_randomized``，默认使用 ``demo_randomized``。
-- ``--robotwin-assets-root``：覆盖 ``ROBOTWIN_ASSETS_ROOT`` 指定的资源目录。
+- ``--robotwin-assets-path``：覆盖 ``ROBOTWIN_ASSETS_PATH`` 指定的资源目录。
 - ``--vla-model-path``：覆盖 ``LINGBOT_MODEL_PATH`` 指定的模型目录。
 - ``--cuda-device``：让仿真环境和 VLA 使用同一张 GPU。
 - ``--env-cuda-device`` 和 ``--vla-cuda-device``：让仿真环境和 VLA 使用不同

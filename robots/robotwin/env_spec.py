@@ -141,7 +141,7 @@ def vla_runtime_contract() -> dict[str, object]:
 class RoboTwinRuntimePaths:
     """Validated runtime resources for a RoboTwin episode."""
 
-    assets_root: Path | None
+    assets_path: Path | None
     model_path: Path | None
 
 
@@ -182,11 +182,11 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
         help="Native RoboTwin task YAML.",
     )
     parser.add_argument(
-        "--robotwin-assets-root",
-        default=os.environ.get("ROBOTWIN_ASSETS_ROOT"),
+        "--robotwin-assets-path",
+        default=os.environ.get("ROBOTWIN_ASSETS_PATH"),
         help=(
-            "Root containing the RoboTwin assets directory. "
-            "Defaults to ROBOTWIN_ASSETS_ROOT."
+            "Path to the RoboTwin asset snapshot. "
+            "Defaults to ROBOTWIN_ASSETS_PATH."
         ),
     )
     parser.add_argument("--env-endpoint", default=None)
@@ -306,25 +306,25 @@ def _require_directory(path: Path, option: str) -> None:
 
 def _resolve_runtime_paths(args: argparse.Namespace) -> RoboTwinRuntimePaths:
     return RoboTwinRuntimePaths(
-        assets_root=_resolve_env_runtime_path(args),
+        assets_path=_resolve_env_runtime_path(args),
         model_path=_resolve_vla_runtime_path(args),
     )
 
 
 def _resolve_env_runtime_path(args: argparse.Namespace) -> Path | None:
-    assets_root: Path | None = None
+    assets_path: Path | None = None
     if args.env_endpoint is None:
-        configured_assets = getattr(args, "robotwin_assets_root", None)
+        configured_assets = getattr(args, "robotwin_assets_path", None)
         if not configured_assets:
             raise ValueError(
-                "--robotwin-assets-root is required when launching the local "
-                "env server; set ROBOTWIN_ASSETS_ROOT or pass the option explicitly"
+                "--robotwin-assets-path is required when launching the local "
+                "env server; set ROBOTWIN_ASSETS_PATH or pass the option explicitly"
             )
-        assets_root = Path(configured_assets).expanduser().resolve()
+        assets_path = Path(configured_assets).expanduser().resolve()
         from robotwin.assets import validate_root
 
-        validate_root(assets_root)
-    return assets_root
+        validate_root(assets_path)
+    return assets_path
 
 
 def _resolve_vla_runtime_path(args: argparse.Namespace) -> Path | None:
@@ -532,14 +532,14 @@ def _spawn_task_env(
     from rpent.utils.daemon import ProcessDaemon, pick_free_port
 
     env_cuda_device, _ = _resolve_cuda_devices(args)
-    assets_path = _resolve_env_runtime_path(args)
-    assets_root = str(assets_path) if assets_path else None
+    resolved_assets = _resolve_env_runtime_path(args)
+    assets_path = str(resolved_assets) if resolved_assets else None
     initial_seed = int(args.seed)
 
     if args.env_endpoint is None:
-        if assets_root is None:
+        if assets_path is None:
             raise ValueError(
-                "--robotwin-assets-root is required to launch the env server"
+                "--robotwin-assets-path is required to launch the env server"
             )
         host, env_port = "127.0.0.1", pick_free_port()
         env_daemon = ProcessDaemon(
@@ -553,8 +553,8 @@ def _spawn_task_env(
                 args.task_config,
                 "--seed",
                 str(initial_seed),
-                "--assets-root",
-                assets_root,
+                "--assets-path",
+                assets_path,
                 "--transport",
                 "http",
                 "--host",
@@ -565,7 +565,7 @@ def _spawn_task_env(
             ],
             env=_subprocess_env(
                 env_cuda_device,
-                ROBOTWIN_ASSETS_ROOT=assets_root,
+                ROBOTWIN_ASSETS_PATH=assets_path,
             ),
             log_path=str(output_dir / "robotwin_env_server.log"),
         )
