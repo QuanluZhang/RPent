@@ -21,6 +21,14 @@ Create an environment and install the RoboTwin dependency set:
 
 You do not need to run the RLinf installer or clone RoboTwin separately.
 
+For networks closer to Chinese mirrors:
+
+.. code-block:: bash
+
+   uv pip install -e ".[robotwin]" \
+      --default-index https://mirrors.aliyun.com/pypi/simple \
+      --index https://pypi.tuna.tsinghua.edu.cn/simple
+
 .. note::
 
    ``.[robotwin]`` uses SAPIEN 3.0.0b1. Other versions can change simulator

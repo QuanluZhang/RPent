@@ -20,6 +20,14 @@ RoboTwin
 
 用户不需要运行 RLinf 安装器，也不需要单独克隆 RoboTwin。
 
+国内网络可使用 PyPI 镜像加速：\
+
+.. code-block:: bash
+
+   uv pip install -e ".[robotwin]" \
+      --default-index https://mirrors.aliyun.com/pypi/simple \
+      --index https://pypi.tuna.tsinghua.edu.cn/simple
+
 .. note::
 
    ``.[robotwin]`` 使用 SAPIEN 3.0.0b1。其他版本可能改变仿真观测，导致模型
