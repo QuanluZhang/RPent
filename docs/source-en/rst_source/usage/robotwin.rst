@@ -56,6 +56,7 @@ Download the LingBot checkpoint and set its location:
 
 .. code-block:: bash
 
+   # add HF_ENDPOINT=https://hf-mirror.com for mainland China users
    hf download RLinf/LingBot-VLA-RoboTwin-EEF-ckpt1500 \
       --revision e727b46cd220b66981ea4d2fd9ba84adc189e2cc \
       --local-dir /path/to/LingBot-VLA-RoboTwin-EEF-ckpt1500
@@ -70,6 +71,8 @@ Run one episode from the activated environment:
 
 .. code-block:: bash
 
+   # add HF_ENDPOINT=https://hf-mirror.com for mainland China users,
+   # as it will download robotwin task related memory data
    rpent --env robotwin \
       --task-name beat_block_hammer \
       --seed 100000 \

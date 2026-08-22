@@ -55,6 +55,7 @@ RoboTwin
 
 .. code-block:: bash
 
+   # 国内用户在可以加上 HF_ENDPOINT=https://hf-mirror.com
    hf download RLinf/LingBot-VLA-RoboTwin-EEF-ckpt1500 \
       --revision e727b46cd220b66981ea4d2fd9ba84adc189e2cc \
       --local-dir /path/to/LingBot-VLA-RoboTwin-EEF-ckpt1500
@@ -69,6 +70,8 @@ RoboTwin
 
 .. code-block:: bash
 
+   # 国内用户在可以加上 HF_ENDPOINT=https://hf-mirror.com,
+   # 因为下面的命令运行过程中会下载相关的memory数据
    rpent --env robotwin \
       --task-name beat_block_hammer \
       --seed 100000 \
