@@ -42,6 +42,8 @@ RoboTwin
 
    robotwin-download-assets --output ~/.robotwin/assets
    export ROBOTWIN_ASSETS_PATH=~/.robotwin/assets
+   # 国内用户可以使用下面的命令
+   # HF_ENDPOINT=https://hf-mirror.com robotwin-download-assets --output ~/.robotwin/assets
 
 下载工具会先校验已有文件；如果目标目录中的 RoboTwin 资源已经完整，
 则不会重复下载。

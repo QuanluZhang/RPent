@@ -43,6 +43,8 @@ Download the supported RoboTwin asset snapshot and set its location:
 
    robotwin-download-assets --output ~/.robotwin/assets
    export ROBOTWIN_ASSETS_PATH=~/.robotwin/assets
+   # use the following command for users in mainland China
+   # HF_ENDPOINT=https://hf-mirror.com robotwin-download-assets --output ~/.robotwin/assets
 
 The downloader validates existing files and skips the download when the target
 directory already contains a complete RoboTwin asset set.
