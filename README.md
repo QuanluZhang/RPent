@@ -171,39 +171,9 @@ rpent --robot libero --dashboard --dashboard-language zh-cn \
   --planner claude_code --model claude-opus-4-8
 ```
 
+For a complete list of CLI options, see the [Key CLI options](https://rpent.readthedocs.io/en/latest/rst_source/quickstart.html#key-cli-options) table in the Quick Start docs.
+
 For more detailed documentation, see the [RPent documentation](https://rpent.readthedocs.io/en/latest/).
-
-## Key CLI Options
-
-<table width="100%" style="width: 100%; table-layout: auto; border-collapse: collapse;">
-  <thead align="center" valign="bottom">
-    <tr>
-      <th style="min-width: 160px; text-align: left;">Flag</th>
-      <th style="min-width: 120px;">Default</th>
-      <th style="min-width: 360px;">Description</th>
-    </tr>
-  </thead>
-  <tbody valign="top">
-    <tr><td><code>--robot</code></td><td>— (required)</td><td>Robot backend. Currently <code>libero</code>.</td></tr>
-    <tr><td><code>--suite</code></td><td>— (required)</td><td>Task suite, e.g. <code>libero_object_task</code>, <code>libero_spatial_swap</code></td></tr>
-    <tr><td><code>--task</code></td><td>— (required)</td><td>Task id within the suite</td></tr>
-    <tr><td><code>--seed</code></td><td><code>0</code></td><td>Random seed</td></tr>
-    <tr><td><code>--planner</code></td><td><code>api</code></td><td><code>api</code> | <code>claude_code</code> | <code>codex</code></td></tr>
-    <tr><td><code>--model</code></td><td>—</td><td>Model id; for <code>api</code>, prefix the provider (<code>anthropic:…</code>, <code>openai:…</code>, <code>openai-chat:…</code>)</td></tr>
-    <tr><td><code>--max-turns</code></td><td><code>100</code></td><td>Max agent turns</td></tr>
-    <tr><td><code>--max-tokens</code></td><td><code>8192</code></td><td>Max tokens per LLM reply</td></tr>
-    <tr><td><code>--reasoning-effort</code></td><td><code>none</code></td><td>Reasoning effort for <code>api</code>, <code>claude_code</code>, and <code>codex</code>: <code>none</code> | <code>low</code> | <code>medium</code> | <code>high</code> | <code>xhigh</code>. Disabling reasoning reduced the average runtime from approximately 13.2 to 7.9 minutes (about 40%) in our LIBERO Pro Long evaluations. Higher effort may improve task success rate. Supported levels ultimately depend on the selected model.</td></tr>
-    <tr><td><code>--no-images</code></td><td>off</td><td>Text-only mode: never send image bytes (for models that reject image input)</td></tr>
-    <tr><td><code>--max-episode-steps</code></td><td><code>10000</code></td><td>Max env steps</td></tr>
-    <tr><td><code>--libero-type</code></td><td><code>LIBERO_TYPE</code> or <code>pro</code></td><td>LIBERO variant: <code>standard</code> | <code>pro</code> | <code>plus</code></td></tr>
-    <tr><td><code>--cuda-device</code></td><td>inherited</td><td>GPU device exposed to the env / VLA / SAM3 servers</td></tr>
-    <tr><td><code>--dashboard</code></td><td>off</td><td>Start a local Dashboard</td></tr>
-    <tr><td><code>--dashboard-language</code></td><td><code>en</code></td><td>Dashboard UI language: <code>en</code> | <code>zh-cn</code></td></tr>
-    <tr><td><code>--env-endpoint</code></td><td>— (spawn)</td><td><code>[protocol://]host:port</code> of an existing env_server (<code>protocol=http|socket</code>, default <code>http</code>). If unset, one is spawned locally.</td></tr>
-    <tr><td><code>--vla-endpoint</code></td><td>— (spawn)</td><td><code>[protocol://]host:port</code> of an existing vla_server (same rules). If unset, one is spawned locally.</td></tr>
-    <tr><td><code>--sam3-endpoint</code></td><td>— (spawn)</td><td><code>[protocol://]host:port</code> of an existing RPent SAM3 service (same rules). If unset, one is spawned locally.</td></tr>
-  </tbody>
-</table>
 
 ## Citation and Acknowledgement
 

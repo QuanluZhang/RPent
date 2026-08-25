@@ -67,8 +67,8 @@ LIBERO-PRO 仿真资源。下面以 LIBERO-PRO 和 ``claude_code`` planner
 关键 CLI 选项
 -------------
 
-下表只列出完成首次运行需要关注的选项。其他通用选项可运行
-``rpent --help`` 查看；有关 LIBERO 机器人的更多配置，请参阅
+下表列出主要的命令行选项。其他通用选项可运行 ``rpent --help`` 查看；
+有关 LIBERO 机器人的更多配置，请参阅
 :doc:`LIBERO 使用指南 <usage/libero>`。
 
 .. list-table::
@@ -79,13 +79,13 @@ LIBERO-PRO 仿真资源。下面以 LIBERO-PRO 和 ``claude_code`` planner
      - 默认值
      - 说明
    * - ``--robot``
-     - 必填
-     - 机器人后端，如 ``libero``
+     - —（必填）
+     - 机器人后端。当前支持 ``libero``。
    * - ``--suite``
-     - 必填
+     - —（必填）
      - 任务套件，如 ``libero_object_task``、``libero_spatial_swap``
    * - ``--task``
-     - 必填
+     - —（必填）
      - 套件内的任务编号
    * - ``--seed``
      - ``0``
@@ -95,11 +95,52 @@ LIBERO-PRO 仿真资源。下面以 LIBERO-PRO 和 ``claude_code`` planner
      - ``api`` | ``claude_code`` | ``codex``
    * - ``--model``
      - —
-     - 模型 ID；``api`` planner 需要模型提供商前缀
-       （``anthropic:…``、``openai:…``、``openai-chat:…``）
+     - 模型 ID；``api`` 需带 provider 前缀（``anthropic:…``、
+       ``openai:…``、``openai-chat:…``）
+   * - ``--max-turns``
+     - ``100``
+     - 智能体最大轮数
+   * - ``--max-tokens``
+     - ``8192``
+     - 单次 LLM 回复最大 token
+   * - ``--reasoning-effort``
+     - ``none``
+     - ``api``、``claude_code`` 与 ``codex`` 的推理强度：``none`` |
+       ``low`` | ``medium`` | ``high`` | ``xhigh``。在我们的 LIBERO Pro
+       Long 评测中，关闭 reasoning 将平均运行时间从约 13.2 分钟缩短至
+       7.9 分钟（约 40%）。较高强度可能提升任务成功率；实际支持的档位
+       取决于所选模型。
+   * - ``--no-images``
+     - 关
+     - 纯文本模式：不向模型发送图片字节（用于不支持图片输入的模型）
+   * - ``--max-episode-steps``
+     - ``10000``
+     - 环境最大步数
+   * - ``--libero-type``
+     - ``LIBERO_TYPE`` 或 ``pro``
+     - LIBERO 类型：``standard`` | ``pro`` | ``plus``
+   * - ``--cuda-device``
+     - 继承当前环境
+     - env_server、vla_server 和 sam3_server 可见的 GPU 设备
    * - ``--dashboard``
      - 关
-     - 为本次运行启动本地 Dashboard 服务
+     - 启动本地 Dashboard
+   * - ``--dashboard-language``
+     - ``en``
+     - Dashboard 界面语言：``en`` | ``zh-cn``
+   * - ``--env-endpoint``
+     - —（自动启动）
+     - 已在运行的 env_server 的 ``[protocol://]host:port``
+       （``protocol=http|socket``，默认 ``http``）。留空时自动启动本地
+       实例。
+   * - ``--vla-endpoint``
+     - —（自动启动）
+     - 已在运行的 vla_server 的 ``[protocol://]host:port``（同上）。
+       留空时自动启动本地实例。
+   * - ``--sam3-endpoint``
+     - —（自动启动）
+     - 已在运行的 sam3_server 的 ``[protocol://]host:port``（同上）。
+       留空时自动启动本地实例。
 
 运行结果
 --------

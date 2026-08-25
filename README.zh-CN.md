@@ -172,39 +172,9 @@ rpent --robot libero --dashboard --dashboard-language zh-cn \
   --planner claude_code --model claude-opus-4-8
 ```
 
+完整的命令行参数列表见 [快速开始](https://rpent.readthedocs.io/zh-cn/latest/rst_source/quickstart.html#cli) 文档中的「关键 CLI 选项」表格。
+
 更详细的文档请参见 [RPent 中文文档](https://rpent.readthedocs.io/zh-cn/latest/)。
-
-## 主要命令行参数
-
-<table width="100%" style="width: 100%; table-layout: auto; border-collapse: collapse;">
-  <thead align="center" valign="bottom">
-    <tr>
-      <th style="min-width: 160px; text-align: left;">参数</th>
-      <th style="min-width: 120px;">默认值</th>
-      <th style="min-width: 360px;">说明</th>
-    </tr>
-  </thead>
-  <tbody valign="top">
-    <tr><td><code>--robot</code></td><td>—（必填）</td><td>机器人后端。当前支持 <code>libero</code>。</td></tr>
-    <tr><td><code>--suite</code></td><td>—（必填）</td><td>任务集，如 <code>libero_object_task</code>、<code>libero_spatial_swap</code></td></tr>
-    <tr><td><code>--task</code></td><td>—（必填）</td><td>任务集内的任务编号</td></tr>
-    <tr><td><code>--seed</code></td><td><code>0</code></td><td>随机种子</td></tr>
-    <tr><td><code>--planner</code></td><td><code>api</code></td><td><code>api</code> | <code>claude_code</code> | <code>codex</code></td></tr>
-    <tr><td><code>--model</code></td><td>—</td><td>模型 ID；<code>api</code> 需带 provider 前缀（<code>anthropic:…</code>、<code>openai:…</code>、<code>openai-chat:…</code>）</td></tr>
-    <tr><td><code>--max-turns</code></td><td><code>100</code></td><td>智能体最大轮数</td></tr>
-    <tr><td><code>--max-tokens</code></td><td><code>8192</code></td><td>单次 LLM 回复最大 token</td></tr>
-    <tr><td><code>--reasoning-effort</code></td><td><code>none</code></td><td><code>api</code>、<code>claude_code</code> 与 <code>codex</code> 的推理强度：<code>none</code> | <code>low</code> | <code>medium</code> | <code>high</code> | <code>xhigh</code>。在我们的 LIBERO Pro Long 评测中，关闭 reasoning 将平均运行时间从约 13.2 分钟缩短至 7.9 分钟（约 40%）。较高强度可能提升任务成功率；实际支持的档位取决于所选模型。</td></tr>
-    <tr><td><code>--no-images</code></td><td>关</td><td>纯文本模式：不向模型发送图片字节（用于不支持图片输入的模型）</td></tr>
-    <tr><td><code>--max-episode-steps</code></td><td><code>10000</code></td><td>环境最大步数</td></tr>
-    <tr><td><code>--libero-type</code></td><td><code>LIBERO_TYPE</code> 或 <code>pro</code></td><td>LIBERO 类型：<code>standard</code> | <code>pro</code> | <code>plus</code></td></tr>
-    <tr><td><code>--cuda-device</code></td><td>继承当前环境</td><td>env_server、vla_server 和 sam3_server 可见的 GPU 设备</td></tr>
-    <tr><td><code>--dashboard</code></td><td>关</td><td>启动本地 Dashboard</td></tr>
-    <tr><td><code>--dashboard-language</code></td><td><code>en</code></td><td>Dashboard 界面语言：<code>en</code> | <code>zh-cn</code></td></tr>
-    <tr><td><code>--env-endpoint</code></td><td>—（自动启动）</td><td>已在运行的 env_server 的 <code>[protocol://]host:port</code>（<code>protocol=http|socket</code>，默认 <code>http</code>）。留空时自动启动本地实例。</td></tr>
-    <tr><td><code>--vla-endpoint</code></td><td>—（自动启动）</td><td>已在运行的 vla_server 的 <code>[protocol://]host:port</code>（同上）。留空时自动启动本地实例。</td></tr>
-    <tr><td><code>--sam3-endpoint</code></td><td>—（自动启动）</td><td>已在运行的 sam3_server 的 <code>[protocol://]host:port</code>（同上）。留空时自动启动本地实例。</td></tr>
-  </tbody>
-</table>
 
 ## 引用与致谢
 
