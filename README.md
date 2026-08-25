@@ -61,18 +61,18 @@ RPent is built for four kinds of users:
     <tr>
       <td>
         <ul style="margin-left: 0; padding-left: 16px;">
-          <li>Claude Code ✅</li>
-          <li>Codex ✅</li>
-          <li>Custom Planner ✅</li>
+          <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/configure_planner.html#the-claude-code-planner">Claude Code</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/configure_planner.html#the-codex-planner">Codex</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/configure_planner.html#add-a-custom-planner">Custom Planner</a> ✅</li>
         </ul>
       </td>
       <td>
         <ul style="margin-left: 0; padding-left: 16px;">
           <li><b>VLA</b></li>
           <ul>
-            <li>Pi0.5 ✅</li>
-            <li>RLDX-1 ✅</li>
-            <li>LingBot-VLA ✅</li>
+            <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/libero.html">Pi0.5</a> ✅</li>
+            <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/robocasa.html">RLDX-1</a> ✅</li>
+            <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/robotwin.html">LingBot-VLA</a> ✅</li>
           </ul>
           <li><b>WAM</b></li>
           <ul>
@@ -82,9 +82,9 @@ RPent is built for four kinds of users:
       </td>
       <td style="text-align: left; padding-left: 8px;">
         <ul style="margin-left: 0; padding-left: 16px;">
-          <li>LIBERO-PRO ✅</li>
-          <li>RoboCasa ✅</li>
-          <li>RoboTwin ✅</li>
+          <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/libero.html">LIBERO-PRO</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/robocasa.html">RoboCasa</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/en/latest/rst_source/usage/robotwin.html">RoboTwin</a> ✅</li>
         </ul>
       </td>
       <td>
@@ -151,30 +151,7 @@ rpent --robot libero --suite libero_object_swap --task 2 --seed 0 \
 ```
 
 See the [planner docs](https://rpent.readthedocs.io/en/latest/rst_source/usage/configure_planner.html) to configure other planners (`api`, `codex`) and model providers.
-
-### Exploration and local-memory evaluation
-
-Evaluation remains the default. Add `--memory-profile local` to evaluate
-against a local global/suite/task memory corpus:
-
-```bash
-rpent --robot libero --suite libero_10_task --task 0 --seed 1 \
-  --planner codex --memory-profile local \
-  --memory-dir /path/to/libero-memory
-```
-
-Use the same entrypoint with `--explore` to enable resettable attempts, fresh
-planner sessions, memory distillation, and automatic merge:
-
-```bash
-rpent --robot libero --suite libero_10_task --task 0 --seed 0 \
-  --planner api --model anthropic:claude-opus-4-8 \
-  --explore --explore-sessions 3 --explore-attempts-per-session 5 \
-  --memory-dir /path/to/libero-memory
-```
-
-The original Hugging Face memory and prompt remain the default
-(`--memory-profile hf`). See the [LIBERO docs](https://rpent.readthedocs.io/en/latest/rst_source/usage/libero.html) for memory maintenance commands.
+For the exploration workflow and local-memory evaluation, see [LIBERO exploration mode](https://rpent.readthedocs.io/en/latest/rst_source/usage/libero.html#exploration-and-local-memory-evaluation).
 
 ### Interactive CLI mode
 
@@ -195,15 +172,6 @@ rpent --robot libero --dashboard --dashboard-language zh-cn \
 ```
 
 For more detailed documentation, see the [RPent documentation](https://rpent.readthedocs.io/en/latest/).
-
-### RoboCasa
-
-RoboCasa uses a separate entrypoint and install guide. See the [RoboCasa usage docs](https://rpent.readthedocs.io/en/latest/rst_source/usage/robocasa.html) for installation and running instructions.
-
-### RoboTwin
-
-RoboTwin is supported with LingBot-VLA for dual-arm manipulation tasks.
-See the [RoboTwin usage docs](https://rpent.readthedocs.io/en/latest/rst_source/usage/robotwin.html) for installation and running instructions.
 
 ## Key CLI Options
 

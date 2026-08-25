@@ -61,18 +61,18 @@ RPent 面向以下四类用户：
     <tr>
       <td>
         <ul style="margin-left: 0; padding-left: 16px;">
-          <li>Claude Code ✅</li>
-          <li>Codex ✅</li>
-          <li>Custom Planner ✅</li>
+          <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/configure_planner.html#claude-code-planner">Claude Code</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/configure_planner.html#codex-planner">Codex</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/configure_planner.html#planner">Custom Planner</a> ✅</li>
         </ul>
       </td>
       <td>
         <ul style="margin-left: 0; padding-left: 16px;">
           <li><b>VLA</b></li>
           <ul>
-            <li>Pi0.5 ✅</li>
-            <li>RLDX-1 ✅</li>
-            <li>LingBot-VLA ✅</li>
+            <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/libero.html">Pi0.5</a> ✅</li>
+            <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/robocasa.html">RLDX-1</a> ✅</li>
+            <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/robotwin.html">LingBot-VLA</a> ✅</li>
           </ul>
           <li><b>WAM</b></li>
           <ul>
@@ -82,9 +82,9 @@ RPent 面向以下四类用户：
       </td>
       <td style="text-align: left; padding-left: 8px;">
         <ul style="margin-left: 0; padding-left: 16px;">
-          <li>LIBERO-PRO ✅</li>
-          <li>RoboCasa ✅</li>
-          <li>RoboTwin ✅</li>
+          <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/libero.html">LIBERO-PRO</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/robocasa.html">RoboCasa</a> ✅</li>
+          <li><a href="https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/robotwin.html">RoboTwin</a> ✅</li>
         </ul>
       </td>
       <td>
@@ -152,30 +152,7 @@ rpent --robot libero --suite libero_object_swap --task 2 --seed 0 \
 ```
 
 其他规划器（`api`、`codex`）与模型提供商的配置见[规划器文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/configure_planner.html)。
-
-### 探索模式与本地 Memory Eval
-
-默认仍为原有 eval。增加 `--memory-profile local` 后，会使用本地
-global/suite/task 三层 memory 进行评测：
-
-```bash
-rpent --robot libero --suite libero_10_task --task 0 --seed 1 \
-  --planner codex --memory-profile local \
-  --memory-dir /path/to/libero-memory
-```
-
-同一个入口增加 `--explore` 后，会启用可 reset 的多次尝试、独立 planner
-session、memory distillation 和自动合并：
-
-```bash
-rpent --robot libero --suite libero_10_task --task 0 --seed 0 \
-  --planner api --model anthropic:claude-opus-4-8 \
-  --explore --explore-sessions 3 --explore-attempts-per-session 5 \
-  --memory-dir /path/to/libero-memory
-```
-
-原有 Hugging Face memory 和 prompt 仍是默认模式（`--memory-profile hf`）。
-memory 维护命令详见 [LIBERO 文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/libero.html)。
+探索模式与本地 memory 评测详见 [LIBERO 文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/libero.html)。
 
 ### 交互模式
 
@@ -194,14 +171,6 @@ rpent --robot libero --suite libero_object_swap --task 2 --seed 0 \
 rpent --robot libero --dashboard --dashboard-language zh-cn \
   --planner claude_code --model claude-opus-4-8
 ```
-
-### RoboCasa
-
-RoboCasa 使用独立入口与安装指南。安装与运行流程见 [RoboCasa 使用文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/robocasa.html)。
-
-### RoboTwin
-
-RoboTwin 支持 LingBot-VLA 双臂操作任务。安装与运行流程见 [RoboTwin 使用文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/usage/robotwin.html)。
 
 更详细的文档请参见 [RPent 中文文档](https://rpent.readthedocs.io/zh-cn/latest/)。
 
