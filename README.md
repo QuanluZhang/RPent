@@ -29,8 +29,21 @@ RPent is built upon three core design principles: **service-oriented, standardiz
   <img src="https://github.com/RLinf/misc/raw/main/pic/rpent_framework.png" alt="RPent framework"/>
 </div>
 
+## Who Should Consider Using RPent?
+
+RPent is built for four kinds of users:
+
+- **Embodied intelligence researchers** targeting high success rates on embodied tasks and benchmarks — especially long-horizon manipulation. RPent's memory-guided, agentic composition consistently lifts task success beyond what a frozen VLA delivers alone.
+- **Online-learning and reinforcement-learning researchers** studying self-evolving embodied agents. RPent's recursive interaction, reflection, and memory-distillation loops provide a ready substrate for continual and reinforcement learning in the physical world.
+- **Robotics application developers** deploying embodied solutions on real robot hardware. RPent's service-oriented, standardized architecture and customizable agentic control logic improve real-world success rates and shorten the path from prototype to production.
+- **End users of deployed physical agents** — the customers of the developers above. Install RPent together with the relevant real-robot extensions and run the predefined tasks out of the box, with no ML expertise required.
+
 ## What's NEW!
 
+- [2026/08] 🔥 We have supported the non-reasoning mode, which reduces average execution time by ~40%.
+- [2026/08] 🔥 We have supported exploration mode for LIBERO. Doc: [LIBERO exploration mode](https://rpent.readthedocs.io/en/latest/rst_source/usage/libero.html#exploration-and-local-memory-evaluation).
+- [2026/08] 🔥 We have supported RoboTwin with LingBot-VLA for dual-arm manipulation tasks. Doc: [RoboTwin](https://rpent.readthedocs.io/en/latest/rst_source/usage/robotwin.html).
+- [2026/08] 🔥 We have supported RoboCasa with RLDX-1 as manipulation model. Doc: [RoboCasa](https://rpent.readthedocs.io/en/latest/rst_source/usage/robocasa.html).
 - [2026/07] 🔥 Our first RPent publication, [Harness VLA: Steering Frozen VLAs into Reliable Manipulation Primitives via Memory-Guided Agents](https://arxiv.org/abs/2607.08448), is released.
 
 ## Feature Matrix
