@@ -23,8 +23,6 @@
 
 **RPent (Recursive Physical Agent)** 是一个用于构建具身智能体的开放框架，使智能体能够通过与物理世界的递归交互持续演化。RPent 并不预设单一基础模型，而是提供一个递归智能体框架，将感知、推理、记忆、执行与自我演化等异构智能统一到一个物理智能体中。通过持续交互、反思与适应，RPent 使物理智能体能够获得新的能力，并超越其初始设计不断演进。
 
-RPent 建立在三项核心设计原则之上：**服务化、标准化和可组合**。RPent 支持将能力部署为可复用服务，通过统一接口连接，并灵活组合成多样化的物理智能体。这些原则使 RPent 能够超越传统机器人控制框架，建立面向物理世界的智能体基础设施；在其中，智能不仅被部署，也被持续构建、扩展与演化。
-
 <div align="center">
   <img src="https://github.com/RLinf/misc/raw/main/pic/rpent_framework.png" alt="RPent framework"/>
 </div>
