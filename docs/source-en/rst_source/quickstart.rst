@@ -74,6 +74,8 @@ The table lists the main CLI options. Run ``rpent --help`` for other
 general options. See the :doc:`LIBERO guide <usage/libero>` for detailed
 robot configuration.
 
+**Main**
+
 .. list-table::
    :header-rows: 1
    :widths: 22 15 63
@@ -93,6 +95,19 @@ robot configuration.
    * - ``--seed``
      - ``0``
      - Random seed
+   * - ``--libero-type``
+     - ``LIBERO_TYPE`` or ``pro``
+     - LIBERO variant: ``standard`` | ``pro`` | ``plus``
+
+**Planner**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 15 63
+
+   * - Flag
+     - Default
+     - Description
    * - ``--planner``
      - ``api``
      - ``api`` | ``claude_code`` | ``codex``
@@ -118,21 +133,22 @@ robot configuration.
      - off
      - Text-only mode: never send image bytes (for models that reject
        image input)
+
+**Environment**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 15 63
+
+   * - Flag
+     - Default
+     - Description
    * - ``--max-episode-steps``
      - ``10000``
      - Max env steps
-   * - ``--libero-type``
-     - ``LIBERO_TYPE`` or ``pro``
-     - LIBERO variant: ``standard`` | ``pro`` | ``plus``
    * - ``--cuda-device``
      - inherited
      - GPU device exposed to the env / VLA / SAM3 servers
-   * - ``--dashboard``
-     - off
-     - Start a local Dashboard
-   * - ``--dashboard-language``
-     - ``en``
-     - Dashboard UI language: ``en`` | ``zh-cn``
    * - ``--env-endpoint``
      - — (spawn)
      - ``[protocol://]host:port`` of an existing env_server
@@ -146,6 +162,22 @@ robot configuration.
      - — (spawn)
      - ``[protocol://]host:port`` of an existing RPent SAM3 service
        (same rules). If unset, one is spawned locally.
+
+**Dashboard**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 15 63
+
+   * - Flag
+     - Default
+     - Description
+   * - ``--dashboard``
+     - off
+     - Start a local Dashboard
+   * - ``--dashboard-language``
+     - ``en``
+     - Dashboard UI language: ``en`` | ``zh-cn``
 
 What you should see
 -------------------

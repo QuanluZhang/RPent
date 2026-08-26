@@ -36,7 +36,7 @@ RPent is built for four kinds of users:
 - **Embodied intelligence researchers** targeting high success rates on embodied tasks and benchmarks — especially long-horizon manipulation. RPent's memory-guided, agentic composition consistently lifts task success beyond what a frozen VLA delivers alone.
 - **Online-learning and reinforcement-learning researchers** studying self-evolving embodied agents. RPent's recursive interaction, reflection, and memory-distillation loops provide a ready substrate for continual and reinforcement learning in the physical world.
 - **Robotics application developers** deploying embodied solutions on real robot hardware. RPent's service-oriented, standardized architecture and customizable agentic control logic improve real-world success rates and shorten the path from prototype to production.
-- **End users of deployed physical agents** — the customers of the developers above. Install RPent together with the relevant real-robot extensions and run the predefined tasks out of the box, with no ML expertise required.
+- **End users of deployed embodied agents** — the customers of the developers above. Install RPent together with the relevant real-robot extensions and run the predefined tasks out of the box, with no ML expertise required.
 
 ## What's NEW!
 
@@ -171,7 +171,7 @@ rpent --robot libero --dashboard --dashboard-language zh-cn \
   --planner claude_code --model claude-opus-4-8
 ```
 
-For a complete list of CLI options, see the [Key CLI options](https://rpent.readthedocs.io/en/latest/rst_source/quickstart.html#key-cli-options) table in the Quick Start docs.
+For a complete list of CLI options, see the [Key CLI options](https://rpent.readthedocs.io/en/latest/rst_source/quickstart.html#key-cli-options) table in the Quick Start docs. RoboCasa and RoboTwin use their own entrypoints and CLI — see the [RoboCasa](https://rpent.readthedocs.io/en/latest/rst_source/usage/robocasa.html) and [RoboTwin](https://rpent.readthedocs.io/en/latest/rst_source/usage/robotwin.html) docs.
 
 For more detailed documentation, see the [RPent documentation](https://rpent.readthedocs.io/en/latest/).
 

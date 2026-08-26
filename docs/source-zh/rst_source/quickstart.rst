@@ -71,6 +71,8 @@ LIBERO-PRO 仿真资源。下面以 LIBERO-PRO 和 ``claude_code`` planner
 有关 LIBERO 机器人的更多配置，请参阅
 :doc:`LIBERO 使用指南 <usage/libero>`。
 
+**主参数**
+
 .. list-table::
    :header-rows: 1
    :widths: 22 15 63
@@ -90,6 +92,19 @@ LIBERO-PRO 仿真资源。下面以 LIBERO-PRO 和 ``claude_code`` planner
    * - ``--seed``
      - ``0``
      - 随机种子
+   * - ``--libero-type``
+     - ``LIBERO_TYPE`` 或 ``pro``
+     - LIBERO 类型：``standard`` | ``pro`` | ``plus``
+
+**Planner**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 15 63
+
+   * - 参数
+     - 默认值
+     - 说明
    * - ``--planner``
      - ``api``
      - ``api`` | ``claude_code`` | ``codex``
@@ -113,21 +128,22 @@ LIBERO-PRO 仿真资源。下面以 LIBERO-PRO 和 ``claude_code`` planner
    * - ``--no-images``
      - 关
      - 纯文本模式：不向模型发送图片字节（用于不支持图片输入的模型）
+
+**环境**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 15 63
+
+   * - 参数
+     - 默认值
+     - 说明
    * - ``--max-episode-steps``
      - ``10000``
      - 环境最大步数
-   * - ``--libero-type``
-     - ``LIBERO_TYPE`` 或 ``pro``
-     - LIBERO 类型：``standard`` | ``pro`` | ``plus``
    * - ``--cuda-device``
      - 继承当前环境
      - env_server、vla_server 和 sam3_server 可见的 GPU 设备
-   * - ``--dashboard``
-     - 关
-     - 启动本地 Dashboard
-   * - ``--dashboard-language``
-     - ``en``
-     - Dashboard 界面语言：``en`` | ``zh-cn``
    * - ``--env-endpoint``
      - —（自动启动）
      - 已在运行的 env_server 的 ``[protocol://]host:port``
@@ -135,12 +151,28 @@ LIBERO-PRO 仿真资源。下面以 LIBERO-PRO 和 ``claude_code`` planner
        实例。
    * - ``--vla-endpoint``
      - —（自动启动）
-     - 已在运行的 vla_server 的 ``[protocol://]host:port``（同上）。
-       留空时自动启动本地实例。
+     - 已在运行的 vla_server 的 ``[protocol://]host:port``
+       （同上）。留空时自动启动本地实例。
    * - ``--sam3-endpoint``
      - —（自动启动）
-     - 已在运行的 sam3_server 的 ``[protocol://]host:port``（同上）。
-       留空时自动启动本地实例。
+     - 已在运行的 sam3_server 的 ``[protocol://]host:port``
+       （同上）。留空时自动启动本地实例。
+
+**Dashboard**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 15 63
+
+   * - 参数
+     - 默认值
+     - 说明
+   * - ``--dashboard``
+     - 关
+     - 启动本地 Dashboard
+   * - ``--dashboard-language``
+     - ``en``
+     - Dashboard 界面语言：``en`` | ``zh-cn``
 
 运行结果
 --------
