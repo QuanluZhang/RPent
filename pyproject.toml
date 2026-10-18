@@ -154,6 +154,19 @@ yam = [
     "pyrealsense2>=2.55,<3",
     "imageio-ffmpeg",
 ]
+lekiwi = [
+    # RLinf release/v0.4 lacks the LeKiwi env layer: install RLinf from a
+    # LeKiwi-supporting revision (branch dev/lekiwi until release) with its
+    # `lekiwi` embodied target on the robot's computer before this extra.
+    # Keep the list below aligned with requirements/embodied/envs/so101.txt
+    # at that revision.
+    "omegaconf>=2.3,<3",
+    "pyyaml",
+    "gymnasium",
+    "lerobot[feetech]>=0.4.1,<0.7",
+    "opencv-python",
+    "imageio[ffmpeg]",
+]
 robotwin = [
     "rpent[rlinf]",
     "rlinf-robotwin-runtime==0.1.3",
@@ -267,6 +280,7 @@ exclude = ["tests*", "docs*", "examples*", "docker*", "toolkits*"]
 [tool.setuptools.package-data]
 "rpent.dashboard" = ["*.html", "static/*.css", "static/*.js"]
 "robots.yam" = ["config/*.yaml", "guides/*.md"]
+"robots.lekiwi" = ["config/*.yaml"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
