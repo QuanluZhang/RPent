@@ -17,11 +17,21 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import yaml
 
 from robots.lekiwi import detect
+
+
+def _fake_module(name: str, **attrs: Any) -> ModuleType:
+    module = ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
 
 
 def _make_dev_tree(tmp_path: Path) -> Path:
@@ -107,6 +117,38 @@ def test_build_site_config_emits_placeholders_when_detection_finds_nothing() -> 
     assert config["cameras"]["devices"]["front"]["main"] is True
 
 
+def test_probe_camera_reports_why_it_failed(monkeypatch) -> None:
+    # A connect failure must surface its own text: on the robot, a cv2 that
+    # cannot import (missing libGL) read as "no frame" and hid the real error.
+    class MissingLibGLCamera:
+        def __init__(self, _info: object) -> None:
+            return None
+
+        def connect(self) -> None:
+            raise ImportError("libGL.so.1: cannot open shared object file")
+
+        def disconnect(self) -> None:
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "rlinf.robotics.parts.cameras",
+        _fake_module("rlinf.robotics.parts.cameras", CameraInfo=lambda **_k: None),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "rlinf.robotics.parts.cameras.webcam",
+        _fake_module(
+            "rlinf.robotics.parts.cameras.webcam", WebcamCamera=MissingLibGLCamera
+        ),
+    )
+
+    report = detect.probe_camera("usb-USB_Camera_USB_Camera_2505280051-video-index0")
+
+    assert report["ok"] is False
+    assert "libGL.so.1" in report["error"]
+
+
 def test_main_writes_a_config_loadable_by_runtime_config(
     fake_rlinf_realworld_modules, tmp_path: Path, monkeypatch, capsys
 ) -> None:
@@ -121,6 +163,7 @@ def test_main_writes_a_config_loadable_by_runtime_config(
             "ok": serial == "video0",
             "width": 640,
             "height": 480,
+            "error": None if serial == "video0" else "no frame within 3 s",
         },
     )
     output = tmp_path / "site.yaml"
@@ -136,7 +179,7 @@ def test_main_writes_a_config_loadable_by_runtime_config(
 
     report = capsys.readouterr().out
     assert "wheel bus: /dev/ttyACM0" in report
-    assert "camera video1: no frame" in report
+    assert "camera video1: failed (no frame within 3 s)" in report
     assert "review before the first run" in report
 
     # The generated YAML must validate against the same loader the env server

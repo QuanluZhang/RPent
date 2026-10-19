@@ -122,6 +122,8 @@ def probe_camera(serial: str) -> dict[str, Any]:
 
     Follows the smoke-test contract in ``toolkits/lekiwi/test_webcam.py``:
     connect, wait for a frame within 3 s, read one observation, disconnect.
+    An error is reported with its text: a missing ``libGL`` or an unopenable
+    device reads differently from a node that opens but never frames.
     """
     from rlinf.robotics.parts.cameras import CameraInfo
     from rlinf.robotics.parts.cameras.webcam import WebcamCamera
@@ -132,12 +134,12 @@ def probe_camera(serial: str) -> dict[str, Any]:
     try:
         camera.connect()
         if not camera.is_ready(timeout=3.0):
-            return {"serial": serial, "ok": False}
+            return {"serial": serial, "ok": False, "error": "no frame within 3 s"}
         frame = camera.get_observation()["frame"]
         height, width = frame.shape[:2]
         return {"serial": serial, "ok": True, "width": width, "height": height}
-    except Exception:  # noqa: BLE001 - an unopenable node is a result
-        return {"serial": serial, "ok": False}
+    except Exception as exc:  # noqa: BLE001 - an unopenable node is a result
+        return {"serial": serial, "ok": False, "error": str(exc)}
     finally:
         camera.disconnect()
 
@@ -225,7 +227,8 @@ def main(argv: list[str] | None = None) -> int:
                     size = f"{report['width']}x{report['height']}"
                     print(f"camera {report['serial']}: ok at {size}")
                 else:
-                    print(f"camera {report['serial']}: no frame")
+                    error = report.get("error") or "no frame"
+                    print(f"camera {report['serial']}: failed ({error})")
         else:
             print(
                 "no cameras found by WebcamCamera.discover(); plug the camera in "

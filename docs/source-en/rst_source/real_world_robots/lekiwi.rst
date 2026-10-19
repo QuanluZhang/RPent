@@ -22,10 +22,17 @@ attach with ``--env-endpoint`` or let RPent spawn a local environment server.
 Dependencies and installation
 -----------------------------
 
-Use Linux and Python 3.11 on the robot's computer. Install RPent with the
-``lekiwi`` extra, then RLinf from a LeKiwi-supporting revision — the released
-``rlinf`` extras do not yet include the LeKiwi environment layer. Until that
-lands in a release, use the ``dev/lekiwi`` branch:
+Use Linux and Python 3.11 on the robot's computer. The ``lekiwi`` extra installs
+GUI OpenCV, which needs the system ``libGL`` library — without it, importing
+``cv2`` fails with ``ImportError: libGL.so.1``:
+
+.. code-block:: bash
+
+   sudo apt-get install -y --no-install-recommends libgl1
+
+Install RPent with the ``lekiwi`` extra, then RLinf from a LeKiwi-supporting
+revision — the released ``rlinf`` extras do not yet include the LeKiwi environment
+layer. Until that lands in a release, use the ``dev/lekiwi`` branch:
 
 .. code-block:: bash
 

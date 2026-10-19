@@ -10,7 +10,13 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 依赖与安装
 ----------
 
-在机器人板载计算机上使用 Linux 和 Python 3.11。先安装带 ``lekiwi`` extra 的 RPent，再从支持 LeKiwi 的 RLinf 修订版本安装——已发布的 ``rlinf`` extra 尚不包含 LeKiwi 环境层，在合入发布前请使用 ``dev/lekiwi`` 分支：
+在机器人板载计算机上使用 Linux 和 Python 3.11。``lekiwi`` extra 安装的是带 GUI 的 OpenCV，需要系统的 ``libGL`` 库——缺少它时导入 ``cv2`` 会报 ``ImportError: libGL.so.1``：
+
+.. code-block:: bash
+
+   sudo apt-get install -y --no-install-recommends libgl1
+
+先安装带 ``lekiwi`` extra 的 RPent，再从支持 LeKiwi 的 RLinf 修订版本安装——已发布的 ``rlinf`` extra 尚不包含 LeKiwi 环境层，在合入发布前请使用 ``dev/lekiwi`` 分支：
 
 .. code-block:: bash
 
