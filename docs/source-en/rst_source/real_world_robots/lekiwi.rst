@@ -43,13 +43,50 @@ plus network reachability to the robot's computer.
 Robot and task configuration
 ----------------------------
 
-Copy ``robots/lekiwi/config/example.yaml`` outside versioned source and fill
-the wheel bus port, the front camera's UVC serial, and the drive limits. Find
-the camera serial with ``ls /dev/v4l2/by-id/`` or
-``v4l2-ctl --list-devices``. Exactly one camera device must set ``main: true``;
-its name becomes ``main_image_key``. The ``drive`` section's keys are RLinf
-environment fields and are validated against the RLinf ``LeKiwiEnvConfig``:
-an unknown key fails at startup instead of being silently ignored.
+Run the detection script on the robot's computer to generate a ready-to-use
+site YAML:
+
+.. code-block:: bash
+
+   python -m robots.lekiwi.detect --output /path/to/robot.yaml
+
+The script never commands motion: it pings the serial bus at every baud rate
+(lerobot's ``FeetechMotorsBus.scan_port``) and opens each camera once to
+confirm it produces a frame. It writes the detected wheel-bus port and camera
+devices plus conservative defaults for everything else, then prints the fields
+a human must still review: ``wheel_radius`` and ``base_radius`` (measure them
+with a ruler, in meters) and the ``drive`` limits (policy, not discovery —
+start from the defaults and raise them gradually). Pass ``--skip-motors`` or
+``--skip-cameras`` to probe only one side.
+
+To fill the fields by hand instead, find each value on the robot's computer:
+
+.. code-block:: bash
+
+   # Wheel bus: the STS3215 board enumerates as a USB serial adapter.
+   # /dev/serial/by-id names survive replugging; plain tty nodes renumber.
+   ls -l /dev/serial/by-id/
+   lerobot-find-port            # pings the bus; the wheels answer at IDs 7, 8, 9
+
+   # Front camera: pick the *-index0 node (the rest are metadata nodes).
+   ls -l /dev/v4l2/by-id/
+   v4l2-ctl --list-devices      # human-readable camera names
+
+``robot.port`` accepts either spelling, but the ``/dev/serial/by-id`` path is
+the stable one. The camera ``serial`` accepts the full ``/dev/v4l2/by-id/...``
+path, which pins the device across replugs; a numeric camera index also works
+but renumbers with plug order. Copy ``robots/lekiwi/config/example.yaml``
+outside versioned source for the overall shape. Exactly one camera device must
+set ``main: true``; its name becomes ``main_image_key``. The ``drive``
+section's keys are RLinf environment fields and are validated against the
+RLinf ``LeKiwiEnvConfig``: an unknown key fails at startup instead of being
+silently ignored.
+
+The fields no command can discover are deliberate choices: geometry
+(``wheel_radius``, ``base_radius``) comes from a ruler, ``max_raw`` (default
+3000) is the servo's raw-speed cap, and the ``drive`` limits are the
+operator's velocity envelope — keep them conservative, since the tasks bound
+them further and the environment clips every command to them.
 
 Tasks are registered in ``robots/lekiwi/tasks.py``. Task 0
 (``drive_smoke_test``) exercises one conservative forward drive, one rotation,

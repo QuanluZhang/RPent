@@ -27,7 +27,44 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 机器人与任务配置
 ----------------
 
-将 ``robots/lekiwi/config/example.yaml`` 复制到版本库之外并填入轮电机串口、前置摄像头的 UVC 序列号和速度上限。摄像头的序列号可以用 ``ls /dev/v4l2/by-id/`` 或 ``v4l2-ctl --list-devices`` 查找。有且仅有一个摄像头设备可以设置 ``main: true``，它的名字会成为 ``main_image_key``。``drive`` 一节的键就是 RLinf 环境字段，会按 RLinf 的 ``LeKiwiEnvConfig`` 校验：未知键会在启动时报错，而不是被静默忽略。
+在机器人板载计算机上运行检测脚本，直接生成可用的站点 YAML：
+
+.. code-block:: bash
+
+   python -m robots.lekiwi.detect --output /path/to/robot.yaml
+
+脚本不会让底盘运动：它只按各个波特率对串行总线执行 ping，即 lerobot 的
+``FeetechMotorsBus.scan_port``，并打开每个摄像头确认能取到一帧。它会写入
+检测到的轮电机串口和摄像头设备，其余字段填保守默认值，并在最后列出仍需人工
+确认的字段：``wheel_radius`` 和 ``base_radius``（用尺子量，单位为米），以及
+``drive`` 的速度上限（这是人为策略，无法探测——从默认值起步，逐步放宽）。
+只探测其中一侧时可以加 ``--skip-motors`` 或 ``--skip-cameras``。
+
+如果想手工填写，可以在机器人板载计算机上用下面的命令找出各个值：
+
+.. code-block:: bash
+
+   # 轮电机串口：STS3215 控制板枚举为一个 USB 串行适配器。
+   # /dev/serial/by-id 名称在重新插拔后不变；裸 tty 节点可能重新编号。
+   ls -l /dev/serial/by-id/
+   lerobot-find-port            # 对总线执行 ping；三个轮电机应答 ID 为 7、8、9
+
+   # 前置摄像头：选 *-index0 节点（其余是元数据节点）。
+   ls -l /dev/v4l2/by-id/
+   v4l2-ctl --list-devices      # 人类可读的摄像头名称
+
+``robot.port`` 两种写法都接受，但 ``/dev/serial/by-id`` 路径更稳定。摄像头的
+``serial`` 可以填完整的 ``/dev/v4l2/by-id/...`` 路径，重新插拔后设备不会漂移；
+填数字摄像头索引也可以，但索引会随插拔顺序变化。整体结构可以参考
+``robots/lekiwi/config/example.yaml``。有且仅有一个摄像头设备可以设置
+``main: true``，它的名字会成为 ``main_image_key``。``drive`` 一节的键就是
+RLinf 环境字段，会按 RLinf 的 ``LeKiwiEnvConfig`` 校验：未知键会在启动时报
+错，而不是被静默忽略。
+
+命令探测不到的字段都是人为选择：几何参数 ``wheel_radius``、``base_radius``
+来自量尺，``max_raw`` 是舵机的原始速度上限、默认值为 3000，``drive`` 的速度
+上限是操作者的速度包络——请保持保守，任务会进一步收紧约束，环境也会把每条命
+令裁剪到上限内。
 
 任务注册在 ``robots/lekiwi/tasks.py`` 中。任务 0（``drive_smoke_test``）依次执行一次保守的前进、一次原地旋转，并在每次动作后检查状态；任务 1（``room_survey``）按有界分段行进并汇报摄像头看到的内容。用 ``--task-id`` 选择任务。
 
