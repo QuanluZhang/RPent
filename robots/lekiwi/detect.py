@@ -20,24 +20,24 @@ Run on the robot's computer, with the ``lekiwi`` extra installed:
 
 Nothing moves: the wheel bus is only pinged (lerobot's
 ``FeetechMotorsBus.scan_port`` broadcasts a ping at every baud rate) and each
-camera is opened once to confirm it produces a frame. Geometry and drive
-limits are policy, not discovery, so they are written as conservative
+camera is opened through the RLinf ``WebcamCamera`` driver to confirm it
+produces a frame. Camera discovery and probing follow the same contract as
+RLinf's own webcam smoke test (``toolkits/lekiwi/test_webcam.py``):
+``WebcamCamera.discover()`` names the devices and a short-lived
+``WebcamCamera`` connection decides which one delivers frames. Geometry and
+drive limits are policy, not discovery, so they are written as conservative
 defaults and named in the report as fields to review.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Any
 
 #: Wheel motor IDs (left, back, right). Must match ``WHEEL_IDS`` in
 #: rlinf/robotics/parts/mobility/lekiwi.py at the installed RLinf revision.
 EXPECTED_WHEEL_IDS = (7, 8, 9)
-
-#: Camera device index range probed when no stable by-id names exist.
-_PROBE_INDICES = range(4)
 
 _PLACEHOLDER_PORT = "/dev/ttyACM0"
 _PLACEHOLDER_SERIAL = "<front-camera-serial>"
@@ -103,72 +103,55 @@ def pick_wheel_port(
     return None, reports
 
 
-def list_cameras(dev_root: Path = Path("/dev")) -> list[dict[str, str]]:
-    """One entry per UVC camera, keyed by its stable by-id capture node.
+def discover_cameras() -> list[str]:
+    """Camera serials from the RLinf webcam driver's own discovery.
 
-    Each camera exposes several ``/dev/v4l2/by-id`` nodes; only the
-    ``-index0`` node captures frames, so that is the one to configure.
+    ``WebcamCamera.discover()`` returns serials the driver itself resolves
+    (``video0``-style names on Linux, numeric indices elsewhere), so whatever
+    it lists here is a valid ``serial`` value in the site YAML. The list can
+    include metadata nodes that carry no frames; :func:`probe_camera` filters
+    those out.
     """
-    by_id = dev_root / "v4l2" / "by-id"
-    if not by_id.is_dir():
-        return []
-    cameras = []
-    for entry in sorted(by_id.iterdir()):
-        if not entry.name.endswith("-index0"):
-            continue
-        label = entry.name.removeprefix("usb-").removesuffix("-index0")
-        cameras.append({"path": str(entry), "label": label})
-    return cameras
+    from rlinf.robotics.parts.cameras.webcam import WebcamCamera
+
+    return sorted(WebcamCamera.discover())
 
 
-def probe_camera(path: str) -> dict[str, Any]:
-    """Open the camera once and report whether it produces a frame."""
-    import cv2
+def probe_camera(serial: str) -> dict[str, Any]:
+    """Open one camera through the RLinf driver and confirm it delivers a frame.
 
-    capture = cv2.VideoCapture(path)
+    Follows the smoke-test contract in ``toolkits/lekiwi/test_webcam.py``:
+    connect, wait for a frame within 3 s, read one observation, disconnect.
+    """
+    from rlinf.robotics.parts.cameras import CameraInfo
+    from rlinf.robotics.parts.cameras.webcam import WebcamCamera
+
+    camera = WebcamCamera(
+        CameraInfo(name="detect", serial_number=serial, camera_type="webcam")
+    )
     try:
-        if not capture.isOpened():
-            return {"path": path, "ok": False}
-        ok, frame = capture.read()
-        report: dict[str, Any] = {
-            "path": path,
-            "ok": bool(ok and frame is not None),
-            "width": int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            "height": int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-        }
-        return report
+        camera.connect()
+        if not camera.is_ready(timeout=3.0):
+            return {"serial": serial, "ok": False}
+        frame = camera.get_observation()["frame"]
+        height, width = frame.shape[:2]
+        return {"serial": serial, "ok": True, "width": width, "height": height}
+    except Exception:  # noqa: BLE001 - an unopenable node is a result
+        return {"serial": serial, "ok": False}
     finally:
-        capture.release()
+        camera.disconnect()
 
 
-def probe_camera_indices() -> list[dict[str, str]]:
-    """Fall back to cv2 device indices when no by-id names exist (macOS, some UVC)."""
-    found = []
-    for index in _PROBE_INDICES:
-        if probe_camera(str(index))["ok"]:
-            found.append({"path": str(index), "label": f"camera {index}"})
-    return found
-
-
-def build_site_config(
-    port: str | None, cameras: list[dict[str, Any]]
-) -> dict[str, Any]:
+def build_site_config(port: str | None, camera_serials: list[str]) -> dict[str, Any]:
     """Assemble the site YAML structure from the detection results."""
+    serials = camera_serials or [_PLACEHOLDER_SERIAL]
     devices: dict[str, dict[str, Any]] = {}
-    for index, camera in enumerate(cameras):
+    for index, serial in enumerate(serials):
         name = "front" if index == 0 else f"extra_{index}"
         devices[name] = {
-            "serial": camera["path"],
+            "serial": serial,
             "type": "webcam",
             "main": index == 0,
-        }
-    if not devices:
-        # Keep the file loadable: the placeholder serial fails at env start
-        # with a clear "Failed to open webcam" instead of a schema error.
-        devices["front"] = {
-            "serial": _PLACEHOLDER_SERIAL,
-            "type": "webcam",
-            "main": True,
         }
     return {
         "robot": {
@@ -213,24 +196,13 @@ def main(argv: list[str] | None = None) -> int:
         ports = list_serial_ports()
         wheel_port, bus_reports = pick_wheel_port(ports)
 
-    cameras: list[dict[str, Any]] = []
+    camera_serials: list[str] = []
     probed: list[dict[str, Any]] = []
     if not args.skip_cameras:
-        cameras = list_cameras()
-        if not cameras and sys.platform != "linux":
-            cameras = probe_camera_indices()
-        for camera in cameras:
-            report = probe_camera(camera["path"])
-            probed.append(report)
-        cameras = [
-            camera
-            for camera in cameras
-            if any(
-                report["ok"] and report["path"] == camera["path"] for report in probed
-            )
-        ]
+        probed = [probe_camera(serial) for serial in discover_cameras()]
+        camera_serials = [report["serial"] for report in probed if report["ok"]]
 
-    config = build_site_config(wheel_port, cameras)
+    config = build_site_config(wheel_port, camera_serials)
 
     print("== LeKiwi site detection ==")
     if not args.skip_motors:
@@ -249,13 +221,15 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_cameras:
         if probed:
             for report in probed:
-                size = f"{report.get('width')}x{report.get('height')}"
-                status = "ok" if report["ok"] else "NO FRAME"
-                print(f"camera {report['path']}: {status} at {size}")
+                if report["ok"]:
+                    size = f"{report['width']}x{report['height']}"
+                    print(f"camera {report['serial']}: ok at {size}")
+                else:
+                    print(f"camera {report['serial']}: no frame")
         else:
             print(
-                "no cameras found under /dev/v4l2/by-id; run "
-                "`v4l2-ctl --list-devices` and fill cameras.devices.front.serial"
+                "no cameras found by WebcamCamera.discover(); plug the camera in "
+                "and retry, or fill cameras.devices.front.serial by hand"
             )
 
     output = Path(args.output)

@@ -27,7 +27,6 @@ from robots.lekiwi import detect
 def _make_dev_tree(tmp_path: Path) -> Path:
     dev = tmp_path / "dev"
     (dev / "serial" / "by-id").mkdir(parents=True)
-    (dev / "v4l2" / "by-id").mkdir(parents=True)
     return dev
 
 
@@ -45,23 +44,6 @@ def test_list_serial_ports_prefers_by_id_spelling(tmp_path: Path) -> None:
     assert str(dev / "ttyACM1") in ports
     # The symlink and its target dedupe to one stable entry.
     assert str(dev / "ttyACM0") not in ports
-
-
-def test_list_cameras_keeps_only_index0_capture_nodes(tmp_path: Path) -> None:
-    dev = _make_dev_tree(tmp_path)
-    by_id = dev / "v4l2" / "by-id"
-    (by_id / "usb-046d_HD_Pro_Webcam_C920_ABC123-index0").touch()
-    (by_id / "usb-046d_HD_Pro_Webcam_C920_ABC123-index1").touch()
-    (by_id / "usb-046d_HD_Pro_Webcam_C920_ABC123-index2").touch()
-
-    cameras = detect.list_cameras(dev)
-
-    assert cameras == [
-        {
-            "path": str(by_id / "usb-046d_HD_Pro_Webcam_C920_ABC123-index0"),
-            "label": "046d_HD_Pro_Webcam_C920_ABC123",
-        }
-    ]
 
 
 def test_pick_wheel_port_requires_every_wheel_id(monkeypatch) -> None:
@@ -103,13 +85,13 @@ def test_pick_wheel_port_tolerates_a_busy_port(monkeypatch) -> None:
 def test_build_site_config_marks_first_camera_main() -> None:
     config = detect.build_site_config(
         "/dev/ttyACM0",
-        [{"path": "/dev/video0"}, {"path": "/dev/video2"}],
+        ["video0", "video2"],
     )
 
     devices = config["cameras"]["devices"]
     assert set(devices) == {"front", "extra_1"}
     assert devices["front"] == {
-        "serial": "/dev/video0",
+        "serial": "video0",
         "type": "webcam",
         "main": True,
     }
@@ -130,17 +112,16 @@ def test_main_writes_a_config_loadable_by_runtime_config(
 ) -> None:
     monkeypatch.setattr(detect, "list_serial_ports", lambda *a, **k: ["/dev/ttyACM0"])
     monkeypatch.setattr(detect, "scan_wheel_bus", lambda port: {1000000: [7, 8, 9]})
-    monkeypatch.setattr(
-        detect,
-        "list_cameras",
-        lambda *a, **k: [
-            {"path": "/dev/v4l2/by-id/usb-046d_C920_ABC-index0", "label": "C920"}
-        ],
-    )
+    monkeypatch.setattr(detect, "discover_cameras", lambda: ["video0", "video1"])
     monkeypatch.setattr(
         detect,
         "probe_camera",
-        lambda path: {"path": path, "ok": True, "width": 640, "height": 480},
+        lambda serial: {
+            "serial": serial,
+            "ok": serial == "video0",
+            "width": 640,
+            "height": 480,
+        },
     )
     output = tmp_path / "site.yaml"
 
@@ -149,10 +130,13 @@ def test_main_writes_a_config_loadable_by_runtime_config(
     assert exit_code == 0
     config = yaml.safe_load(output.read_text())
     assert config["robot"]["port"] == "/dev/ttyACM0"
+    # Only the camera that delivered a frame is written.
+    assert config["cameras"]["devices"]["front"]["serial"] == "video0"
     assert config["cameras"]["devices"]["front"]["main"] is True
 
     report = capsys.readouterr().out
     assert "wheel bus: /dev/ttyACM0" in report
+    assert "camera video1: no frame" in report
     assert "review before the first run" in report
 
     # The generated YAML must validate against the same loader the env server
@@ -163,17 +147,13 @@ def test_main_writes_a_config_loadable_by_runtime_config(
     assert runtime.rlinf.env.eval.main_image_key == "front"
     hardware = runtime.rlinf.cluster.node_groups[0].hardware.configs[0]
     assert hardware["port"] == "/dev/ttyACM0"
-    assert hardware["camera_serials"] == ["/dev/v4l2/by-id/usb-046d_C920_ABC-index0"]
+    assert hardware["camera_serials"] == ["video0"]
 
 
 def test_main_reports_a_missing_wheel_bus(monkeypatch, capsys, tmp_path: Path) -> None:
     monkeypatch.setattr(detect, "list_serial_ports", lambda *a, **k: ["/dev/ttyUSB0"])
     monkeypatch.setattr(detect, "scan_wheel_bus", lambda port: {})
-    monkeypatch.setattr(detect, "list_cameras", lambda *a, **k: [])
-    # Keep the non-Linux index fallback from opening real cameras.
-    monkeypatch.setattr(
-        detect, "probe_camera", lambda path: {"path": path, "ok": False}
-    )
+    monkeypatch.setattr(detect, "discover_cameras", lambda: [])
     output = tmp_path / "site.yaml"
 
     detect.main(["--output", str(output)])
