@@ -164,7 +164,11 @@ lekiwi = [
     "pyyaml",
     "gymnasium",
     "lerobot[feetech]>=0.4.1,<0.7",
-    "opencv-python",
+    # Headless: lerobot[feetech] installs opencv-python-headless, and mixing
+    # the GUI and headless distributions corrupts cv2/ (both unpack into it),
+    # so keep this extra on the headless build — the robot computer has no
+    # display, and the GUI build needs a system libGL.so.1.
+    "opencv-python-headless",
     "imageio[ffmpeg]",
 ]
 robotwin = [

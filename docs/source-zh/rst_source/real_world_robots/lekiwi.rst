@@ -10,13 +10,7 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 依赖与安装
 ----------
 
-在机器人板载计算机上使用 Linux 和 Python 3.11。``lekiwi`` extra 安装的是带 GUI 的 OpenCV，需要系统的 ``libGL`` 库——缺少它时导入 ``cv2`` 会报 ``ImportError: libGL.so.1``：
-
-.. code-block:: bash
-
-   sudo apt-get install -y --no-install-recommends libgl1
-
-先安装带 ``lekiwi`` extra 的 RPent，再从支持 LeKiwi 的 RLinf 修订版本安装——已发布的 ``rlinf`` extra 尚不包含 LeKiwi 环境层，在合入发布前请使用 ``dev/lekiwi`` 分支：
+在机器人板载计算机上使用 Linux 和 Python 3.11。先安装带 ``lekiwi`` extra 的 RPent，再从支持 LeKiwi 的 RLinf 修订版本安装——已发布的 ``rlinf`` extra 尚不包含 LeKiwi 环境层，在合入发布前请使用 ``dev/lekiwi`` 分支：
 
 .. code-block:: bash
 
@@ -27,6 +21,8 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
    source .venv/bin/activate
    uv pip install --torch-backend cpu -e '.[lekiwi]' -e /path/to/RLinf
    uv pip check
+
+该 extra 安装的是 headless 版 OpenCV，与 ``lerobot[feetech]`` 保持一致：板载计算机没有显示器，而 GUI 版 OpenCV 还需要系统安装 ``libgl1``。不要在同一个 venv 中再加装 GUI 版 ``opencv-python``——两个发行版会解包到同一个 ``cv2`` 包里并互相覆盖。
 
 控制端机器只需安装 RPent 本身（``uv pip install -e '.[lekiwi]'``），并能通过网络访问机器人板载计算机即可。
 

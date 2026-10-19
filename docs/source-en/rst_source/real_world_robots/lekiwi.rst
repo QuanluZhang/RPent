@@ -22,17 +22,10 @@ attach with ``--env-endpoint`` or let RPent spawn a local environment server.
 Dependencies and installation
 -----------------------------
 
-Use Linux and Python 3.11 on the robot's computer. The ``lekiwi`` extra installs
-GUI OpenCV, which needs the system ``libGL`` library — without it, importing
-``cv2`` fails with ``ImportError: libGL.so.1``:
-
-.. code-block:: bash
-
-   sudo apt-get install -y --no-install-recommends libgl1
-
-Install RPent with the ``lekiwi`` extra, then RLinf from a LeKiwi-supporting
-revision — the released ``rlinf`` extras do not yet include the LeKiwi environment
-layer. Until that lands in a release, use the ``dev/lekiwi`` branch:
+Use Linux and Python 3.11 on the robot's computer. Install RPent with the
+``lekiwi`` extra, then RLinf from a LeKiwi-supporting revision — the released
+``rlinf`` extras do not yet include the LeKiwi environment layer. Until that
+lands in a release, use the ``dev/lekiwi`` branch:
 
 .. code-block:: bash
 
@@ -43,6 +36,11 @@ layer. Until that lands in a release, use the ``dev/lekiwi`` branch:
    source .venv/bin/activate
    uv pip install --torch-backend cpu -e '.[lekiwi]' -e /path/to/RLinf
    uv pip check
+
+The extra installs headless OpenCV, matching ``lerobot[feetech]``: the robot
+computer has no display, and the GUI OpenCV build would additionally require a
+system ``libgl1`` package. Do not add GUI ``opencv-python`` to the same venv —
+the two distributions unpack into the same ``cv2`` package and corrupt it.
 
 The agent machine needs only RPent itself (``uv pip install -e '.[lekiwi]'``)
 plus network reachability to the robot's computer.
