@@ -166,8 +166,9 @@ class GctStreamBackend:
     Frames pushed during a session are preprocessed on arrival (resize to the
     model's input size, patch-aligned, cropped) and stacked; :meth:`build`
     runs :meth:`GCTStream.inference_streaming` over them and serializes the
-    predictions — camera poses, per-frame depth, and the world point cloud —
-    plus the archived source frames as the map artifact.
+    predictions — camera poses, per-frame depth, and a world point cloud
+    unprojected from that depth — plus the archived source frames as the map
+    artifact.
     """
 
     def __init__(self, output_dir: str, checkpoint: str) -> None:
@@ -199,7 +200,6 @@ class GctStreamBackend:
             kv_cache_include_scale_frames=True,
             use_sdpa=True,
             camera_num_iterations=4,
-            enable_point=True,
         )
         ckpt = torch.load(resolved, map_location=self._device, weights_only=False)
         state_dict = ckpt.get("model", ckpt)
@@ -304,20 +304,31 @@ class GctStreamBackend:
         extrinsic_np = extrinsic_4x4[..., :3, :4].detach().cpu().numpy()
         intrinsic_np = intrinsic.detach().cpu().numpy()
 
-        points = predictions.get("world_points")
-        points_conf = predictions.get("world_points_conf")
-        if points is not None:
-            points_np = points.detach().cpu().numpy()
+        depth = predictions.get("depth")
+        if depth is not None:
+            depth_np = depth.detach().cpu().numpy()
+            np.save(map_dir / "depth.npy", depth_np)
+            # The published checkpoints contain no point-head weights
+            # (``enable_point`` heads stay random), so derive the world point
+            # cloud from the depth head via upstream unprojection, as the
+            # LingBot-Map viewer does by default.
+            from lingbot_map.utils.geometry import (
+                unproject_depth_map_to_point_map,
+            )
+
+            extrinsic_squeezed = extrinsic_np[0]
+            intrinsic_squeezed = intrinsic_np[0]
+            points_np = unproject_depth_map_to_point_map(
+                depth_np[0], extrinsic_squeezed, intrinsic_squeezed
+            )
+            np.save(map_dir / "world_points.npy", points_np)
+            points_conf = predictions.get("depth_conf")
             conf_np = (
                 points_conf.detach().cpu().numpy()
                 if points_conf is not None
                 else np.ones(points_np.shape[:-1], dtype=np.float32)
             )
-            np.save(map_dir / "world_points.npy", points_np)
-            np.save(map_dir / "world_points_conf.npy", conf_np)
-        depth = predictions.get("depth")
-        if depth is not None:
-            np.save(map_dir / "depth.npy", depth.detach().cpu().numpy())
+            np.save(map_dir / "world_points_conf.npy", conf_np[0])
 
         poses = [
             {"pose": pose, "timestamp_s": timestamp}
