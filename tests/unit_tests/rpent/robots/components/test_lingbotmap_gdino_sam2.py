@@ -32,6 +32,7 @@ from rpent.robots.components.lingbotmap_client import LingBotMapClient
 from rpent.robots.components.lingbotmap_server import (
     FrameArchiveBackend,
     LingBotMapFacade,
+    build_lingbot_backend,
 )
 from rpent.utils.rpc import RpcClient
 
@@ -129,6 +130,45 @@ class TestLingBotMapService:
         metadata = map_client.load_map_metadata(built.map_path)
         assert metadata["map_name"] == "meta"
         assert metadata["frames"] == 1
+
+    def test_backend_selection_defaults_to_archive(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LINGBOTMAP_CHECKPOINT_PATH", raising=False)
+        backend = build_lingbot_backend(str(tmp_path / "maps"))
+        assert isinstance(backend, FrameArchiveBackend)
+
+    def test_backend_selection_falls_back_when_package_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LINGBOTMAP_CHECKPOINT_PATH", str(tmp_path / "ckpt.pt"))
+        (tmp_path / "ckpt.pt").touch()
+        backend = build_lingbot_backend(str(tmp_path / "maps"))
+        assert isinstance(backend, FrameArchiveBackend)
+
+    def test_backend_selection_refuses_missing_checkpoint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The real package is not importable offline; simulate its presence with
+        # a stub module so only the missing-checkpoint path is exercised.
+        import sys
+        import types
+
+        stub = types.ModuleType("lingbot_map")
+        models = types.ModuleType("lingbot_map.models")
+        gct = types.ModuleType("lingbot_map.models.gct_stream")
+
+        class _StubGCTStream:  # pragma: no cover - constructor is never reached
+            def __init__(self, **_: Any) -> None:
+                raise AssertionError("model must not load without a checkpoint")
+
+        gct.GCTStream = _StubGCTStream
+        monkeypatch.setitem(sys.modules, "lingbot_map", stub)
+        monkeypatch.setitem(sys.modules, "lingbot_map.models", models)
+        monkeypatch.setitem(sys.modules, "lingbot_map.models.gct_stream", gct)
+        monkeypatch.setenv("LINGBOTMAP_CHECKPOINT_PATH", str(tmp_path / "absent.pt"))
+        with pytest.raises(FileNotFoundError, match="LingBot-Map checkpoint"):
+            build_lingbot_backend(str(tmp_path / "maps"))
 
 
 class _FakePerceptionFacade:

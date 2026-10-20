@@ -190,3 +190,99 @@ Since the LeKiwi environment reports measured velocity but no odometry pose,
 frames are pushed without one and the mapping service estimates pose from
 frames alone. The safety rules above apply unchanged during the teleoperation
 sweep.
+
+Start the Mapping Service Manually
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Start the mapping server yourself when you want to inspect it in isolation or
+run it on a different machine:
+
+.. code-block:: bash
+
+   LINGBOTMAP_OUTPUT_DIR=/path/to/maps \
+       python -m rpent.robots.components.lingbotmap_server \
+       --transport http --host 127.0.0.1 --port 8116
+
+Built maps are written under ``LINGBOTMAP_OUTPUT_DIR`` (or ``--output-dir``),
+one directory per map with ``frames/*.png``, ``poses.json``, and ``map.json``.
+Attach RPent to the running server by passing its address:
+
+.. code-block:: bash
+
+   rpent --robot lekiwi ... --map-endpoint http://127.0.0.1:8116
+
+Prepare the Perception Service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The perception server needs a CUDA GPU, the ``grounding-sam2`` extra, and two
+checkpoints:
+
+.. code-block:: bash
+
+   uv pip install -e '.[grounding-sam2]'
+
+   # Grounding DINO: the original checkpoint from the official release. The
+   # transformers-format model.safetensors on Hugging Face will not load.
+   wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth \
+       -P /path/to/checkpoints
+
+   # SAM 2: add HF_ENDPOINT=https://hf-mirror.com for mainland China users
+   hf download facebook/sam2.1-hiera-large sam2.1_hiera_large.pt \
+       --local-dir /path/to/checkpoints
+
+   export GDINO_CHECKPOINT_PATH=/path/to/checkpoints/groundingdino_swint_ogc.pth
+   export SAM2_CHECKPOINT_PATH=/path/to/checkpoints/sam2.1_hiera_large.pt
+
+Keep the checkpoint filenames unchanged: the server picks the SAM 2 model
+config from the filename. Then start it and attach RPent with
+``--gdino-sam2-endpoint http://127.0.0.1:8115``:
+
+.. code-block:: bash
+
+   python -m rpent.robots.components.gdino_sam2_server \
+       --transport http --host 127.0.0.1 --port 8115
+
+Test the Services Manually
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both servers answer plain RPC calls, so a few lines of Python are enough to
+confirm one is alive before wiring it into a run. For the mapping server,
+push a handful of synthetic frames and build:
+
+.. code-block:: python
+
+   import numpy as np
+   from rpent.robots.components.lingbotmap_client import LingBotMapClient
+   from rpent.utils.rpc.http_rpc import HttpRpcClient
+
+   client = LingBotMapClient(HttpRpcClient("http://127.0.0.1:8116"))
+   client.start_session(map_name="smoke_test")
+   for index in range(10):
+       frame = np.zeros((480, 640, 3), dtype=np.uint8)
+       frame[:, :, index % 3] = 60 + index  # synthetic frames; a real run pushes camera frames
+       client.push_frame(frame, pose=None, timestamp_s=index * 0.5)
+   result = client.build()
+   print(result.map_path, result.frames)  # .../maps/smoke_test 10
+
+A successful build prints the map directory and the frame count; the
+directory contains the archived frames and ``map.json``. Call
+``client.stop_session()`` instead of ``build`` to discard a session.
+
+For the perception server, run detection on any local photo:
+
+.. code-block:: python
+
+   import imageio
+   from rpent.robots.components.gdino_sam2_client import GdinoSam2Client
+   from rpent.utils.rpc.http_rpc import HttpRpcClient
+
+   client = GdinoSam2Client(HttpRpcClient("http://127.0.0.1:8115"))
+   image = imageio.imread("photo.jpg")
+   result = client.detect_segment(image, labels=["chair", "desk"])
+   for detection in result.detections:
+       print(detection.label, round(detection.score, 2), detection.box)
+
+Each detection prints the matched label, its score, and its ``[x1, y1, x2,
+y2]`` pixel box; ``result.detections`` is empty when the frame matches none of
+the labels. The first call is slow while both models run their first
+inference.

@@ -70,6 +70,7 @@ class GdinoSam2Facade(RpcFacade):
             import torch
             from groundingdino.util.inference import load_model as load_gdino
             from sam2.build_sam import build_sam2
+            from sam2.sam2_image_predictor import SAM2ImagePredictor
         except ImportError as exc:
             raise RuntimeError(
                 "local Grounding DINO + SAM 2 dependencies are missing; install "
@@ -87,13 +88,16 @@ class GdinoSam2Facade(RpcFacade):
         self._sam2_checkpoint = _resolve_checkpoint(
             sam2_checkpoint, "SAM2_CHECKPOINT_PATH"
         )
+        self._gdino_config = _resolve_gdino_config()
         logger.info("loading Grounding DINO: %s", self._gdino_checkpoint)
-        self._gdino = load_gdino(self._gdino_checkpoint)
+        self._gdino = load_gdino(self._gdino_config, self._gdino_checkpoint)
         logger.info("loading SAM 2: %s", self._sam2_checkpoint)
-        self._sam2 = build_sam2(
-            config_file=self._sam2_config(),
-            ckpt_path=self._sam2_checkpoint,
-            device="cuda",
+        self._sam2 = SAM2ImagePredictor(
+            build_sam2(
+                config_file=self._sam2_config(),
+                ckpt_path=self._sam2_checkpoint,
+                device="cuda",
+            )
         )
         self._torch = torch
         self._device = "cuda"
@@ -102,10 +106,20 @@ class GdinoSam2Facade(RpcFacade):
     def _sam2_config(self) -> str:
         """SAM 2 model config matching the checkpoint, from its filename."""
         name = Path(self._sam2_checkpoint).name.lower()
-        for key in ("hiera_large", "hiera_base_plus", "hiera_small", "hiera_tiny"):
+        family = "sam2.1" if "sam2.1" in name else "sam2"
+        size_by_key = {
+            "hiera_large": "l",
+            "hiera_base_plus": "b+",
+            "hiera_b+": "b+",
+            "hiera_small": "s",
+            "hiera_tiny": "t",
+        }
+        size = "l"
+        for key, value in size_by_key.items():
             if key in name:
-                return f"configs/sam2.1/{key.replace('_', '_')}.yaml"
-        return "configs/sam2.1/sam2.1_hiera_large.yaml"
+                size = value
+                break
+        return f"configs/{family}/{family}_hiera_{size}.yaml"
 
     def _register_rpc(self) -> None:
         self._rpc["gdino_sam2.detect_segment"] = self.detect_segment
@@ -171,74 +185,72 @@ class GdinoSam2Facade(RpcFacade):
                 box_threshold=min_score,
                 text_threshold=min_score,
             )
-        if boxes is None or scores is None:
-            return detections
-        boxes_np = (
-            boxes if isinstance(boxes, np.ndarray) else boxes.detach().float().cpu().numpy()
-        )
-        scores_np = (
-            scores
-            if isinstance(scores, np.ndarray)
-            else scores.detach().float().cpu().numpy()
-        ).reshape(-1)
-        phrases = list(phrases or ())
-        if boxes_np.ndim != 2 or boxes_np.shape[1] != 4:
-            return detections
-        height, width = image.shape[:2]
-        keep: list[tuple[float, list[float], int]] = []
-        for index, (box, score) in enumerate(zip(boxes_np, scores_np, strict=True)):
-            label = phrases[index] if index < len(phrases) else ""
-            if label not in prompts:
-                continue
-            keep.append((float(score), [float(value) for value in box], index))
-        keep.sort(key=lambda item: -item[0])
-        for score, cxcywh, index in keep:
-            mask = self._segment(image, cxcywh)
-            if mask is None:
-                continue
-            x1 = max(0.0, (cxcywh[0] - cxcywh[2] / 2) * width)
-            y1 = max(0.0, (cxcywh[1] - cxcywh[3] / 2) * height)
-            x2 = min(float(width), (cxcywh[0] + cxcywh[2] / 2) * width)
-            y2 = min(float(height), (cxcywh[1] + cxcywh[3] / 2) * height)
-            detections.append(
-                {
-                    "label": label,
-                    "score": score,
-                    "box": [x1, y1, x2, y2],
-                    "mask_png_base64": _encode_mask_png(mask),
-                }
+            if boxes is None or scores is None:
+                return detections
+            boxes_np = (
+                boxes
+                if isinstance(boxes, np.ndarray)
+                else boxes.detach().float().cpu().numpy()
             )
+            scores_np = (
+                scores
+                if isinstance(scores, np.ndarray)
+                else scores.detach().float().cpu().numpy()
+            ).reshape(-1)
+            phrases = list(phrases or ())
+            if boxes_np.ndim != 2 or boxes_np.shape[1] != 4:
+                return detections
+            height, width = image.shape[:2]
+            # Grounding DINO lowercases the caption, so match phrases case-insensitively.
+            prompt_by_lower = {label.lower(): label for label in prompts}
+            keep: list[tuple[float, list[float], str]] = []
+            for index, (box, score) in enumerate(zip(boxes_np, scores_np, strict=True)):
+                phrase = phrases[index] if index < len(phrases) else ""
+                label = prompt_by_lower.get(phrase.strip().lower())
+                if label is None:
+                    continue
+                keep.append((float(score), [float(value) for value in box], label))
+            keep.sort(key=lambda item: -item[0])
+            self._sam2.set_image(image)
+            for score, cxcywh, label in keep:
+                mask = self._segment(image, cxcywh)
+                if mask is None:
+                    continue
+                x1 = max(0.0, (cxcywh[0] - cxcywh[2] / 2) * width)
+                y1 = max(0.0, (cxcywh[1] - cxcywh[3] / 2) * height)
+                x2 = min(float(width), (cxcywh[0] + cxcywh[2] / 2) * width)
+                y2 = min(float(height), (cxcywh[1] + cxcywh[3] / 2) * height)
+                detections.append(
+                    {
+                        "label": label,
+                        "score": score,
+                        "box": [x1, y1, x2, y2],
+                        "mask_png_base64": _encode_mask_png(mask),
+                    }
+                )
         return detections
 
     def _segment(self, image: np.ndarray, cxcywh: list[float]) -> np.ndarray | None:
         """Refine one normalized cxcywh box into an instance mask with SAM 2."""
-        torch = self._torch
         height, width = image.shape[:2]
-        box = torch.tensor(
-            [[
+        box = np.array(
+            [
                 max(0.0, (cxcywh[0] - cxcywh[2] / 2)) * width,
                 max(0.0, (cxcywh[1] - cxcywh[3] / 2)) * height,
                 min(float(width), (cxcywh[0] + cxcywh[2] / 2) * width),
                 min(float(height), (cxcywh[1] + cxcywh[3] / 2) * height),
-            ]],
-            device=self._device,
+            ]
         )
-        if box[0][2] <= box[0][0] or box[0][3] <= box[0][1]:
+        if box[2] <= box[0] or box[3] <= box[1]:
             return None
-        frame = torch.from_numpy(np.asarray(image)).to(self._device)
-        frame = frame.permute(2, 0, 1).float()
-        with self._inference_context():
-            masks, scores, _ = self._sam2.predict(
-                point_coords=None,
-                point_labels=None,
-                box=box,
-                multimask_output=False,
-            )
-        mask = masks[int(np.argmax(scores.detach().float().cpu().numpy()))]
-        mask_np = (
-            mask if isinstance(mask, np.ndarray) else mask.detach().float().cpu().numpy()
+        masks, scores, _ = self._sam2.predict(
+            point_coords=None,
+            point_labels=None,
+            box=box,
+            multimask_output=False,
         )
-        return np.asarray(mask_np) > 0
+        mask = masks[int(np.argmax(scores))]
+        return np.asarray(mask) > 0
 
 
 def _resolve_checkpoint(value: str, env_name: str) -> str:
@@ -246,6 +258,16 @@ def _resolve_checkpoint(value: str, env_name: str) -> str:
     if not resolved.is_file():
         raise FileNotFoundError(f"checkpoint not found ({env_name}): {resolved}")
     return str(resolved)
+
+
+def _resolve_gdino_config() -> str:
+    """Locate the Grounding DINO model config shipped inside its package."""
+    import groundingdino
+
+    config = Path(groundingdino.__file__).parent / "config" / "GroundingDINO_SwinT_OGC.py"
+    if not config.is_file():
+        raise FileNotFoundError(f"Grounding DINO config not found: {config}")
+    return str(config)
 
 
 def _build_argparser() -> argparse.ArgumentParser:

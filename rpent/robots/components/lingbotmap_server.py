@@ -17,18 +17,22 @@
 Run manually with::
 
     LINGBOTMAP_OUTPUT_DIR=/path/to/maps \\
+    LINGBOTMAP_CHECKPOINT_PATH=/path/to/lingbot-map.pt \\
         python -m rpent.robots.components.lingbotmap_server \\
         --transport http --host 127.0.0.1 --port 8116
 
 RPent normally starts this process automatically. The service exposes
 ``map.start_session`` / ``map.push_frame`` / ``map.build`` / ``map.stop_session``
-/ ``map.load_metadata`` RPC methods over either HTTP or socket transport.
+``/ map.load_metadata`` RPC methods over either HTTP or socket transport.
 
 The LingBot-Map builder is wrapped behind the small :class:`MapBackend`
-protocol so the concrete integration stays in one adapter function. The
-default backend (:class:`FrameArchiveBackend`) records frames and poses and
-serializes them as the map artifact, which keeps the RPC contract and the
-tool flow verifiable offline.
+protocol so the concrete integration stays in one adapter function. With the
+``lingbot-map`` package and a model checkpoint
+(:class:`GctStreamBackend`), pushed frames are reconstructed into camera
+poses, per-frame depth, and a world point cloud. Without them the reference
+:class:`FrameArchiveBackend` records frames and poses and serializes them as
+the map artifact, which keeps the RPC contract and the tool flow verifiable
+offline.
 """
 
 from __future__ import annotations
@@ -136,18 +140,207 @@ class FrameArchiveBackend:
 def build_lingbot_backend(output_dir: str) -> MapBackend:
     """Resolve the LingBot-Map backend for this server run.
 
-    The reference archive backend is the default. When the ``lingbotmap``
-    import is available, it is used instead; its exact constructor is fixed
-    once the concrete LingBot-Map package API is pinned.
+    The GCT streaming model is used when the ``lingbot-map`` package is
+    importable and ``LINGBOTMAP_CHECKPOINT_PATH`` points at a checkpoint;
+    otherwise the reference archive backend keeps the service running.
     """
-    try:
-        import lingbotmap  # type: ignore[import-not-found]
+    checkpoint = os.environ.get("LINGBOTMAP_CHECKPOINT_PATH")
+    if checkpoint:
+        try:
+            return GctStreamBackend(output_dir, checkpoint)
+        except ImportError as exc:
+            logger.warning(
+                "LINGBOTMAP_CHECKPOINT_PATH is set but lingbot-map is not "
+                "installed (%s); falling back to the frame-archive backend", exc
+            )
+    else:
+        logger.info(
+            "LINGBOTMAP_CHECKPOINT_PATH is not set; using the frame-archive backend"
+        )
+    return FrameArchiveBackend(output_dir)
 
-        logger.info("using lingbotmap package %s", getattr(lingbotmap, "__version__", "?"))
-        return FrameArchiveBackend(output_dir)  # placeholder until API pinned
-    except ImportError:
-        logger.info("lingbotmap not installed; using frame-archive backend")
-        return FrameArchiveBackend(output_dir)
+
+class GctStreamBackend:
+    """Map backend running the real LingBot-Map GCT streaming model.
+
+    Frames pushed during a session are preprocessed on arrival (resize to the
+    model's input size, patch-aligned, cropped) and stacked; :meth:`build`
+    runs :meth:`GCTStream.inference_streaming` over them and serializes the
+    predictions — camera poses, per-frame depth, and the world point cloud —
+    plus the archived source frames as the map artifact.
+    """
+
+    def __init__(self, output_dir: str, checkpoint: str) -> None:
+        resolved = Path(checkpoint).expanduser().resolve()
+        if not resolved.is_file():
+            raise FileNotFoundError(f"LingBot-Map checkpoint not found: {resolved}")
+        import torch
+        from lingbot_map.models.gct_stream import GCTStream
+
+        self._torch = torch
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._output_dir = Path(output_dir)
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+        self._map_name = ""
+        self._preprocessed: list[Any] = []
+        self._source_frames: list[np.ndarray] = []
+        self._poses: list[list[float] | None] = []
+        self._timestamps: list[float] = []
+
+        logger.info("loading LingBot-Map GCTStream: %s", resolved)
+        self._model = GCTStream(
+            img_size=512,
+            patch_size=14,
+            enable_3d_rope=True,
+            max_frame_num=1024,
+            kv_cache_sliding_window=64,
+            kv_cache_scale_frames=8,
+            kv_cache_cross_frame_special=True,
+            kv_cache_include_scale_frames=True,
+            use_sdpa=True,
+            camera_num_iterations=4,
+        )
+        ckpt = torch.load(resolved, map_location=self._device, weights_only=False)
+        state_dict = ckpt.get("model", ckpt)
+        missing, unexpected = self._model.load_state_dict(state_dict, strict=False)
+        if missing:
+            logger.warning("LingBot-Map checkpoint missing %d keys", len(missing))
+        if unexpected:
+            logger.warning("LingBot-Map checkpoint has %d unexpected keys", len(unexpected))
+        self._model = self._model.to(self._device).eval()
+        logger.info("LingBot-Map model loaded on %s", self._device)
+
+    def start(self, map_name: str) -> None:
+        self._map_name = map_name
+        self._preprocessed = []
+        self._source_frames = []
+        self._poses = []
+        self._timestamps = []
+
+    def push_frame(
+        self, image: np.ndarray, pose: np.ndarray | None, timestamp_s: float
+    ) -> None:
+        frame = np.asarray(image)
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise ValueError(f"pushed frame must be RGB [H,W,3], got {frame.shape}")
+        self._source_frames.append(frame)
+        self._poses.append(
+            np.asarray(pose, dtype=np.float64).tolist() if pose is not None else None
+        )
+        self._timestamps.append(float(timestamp_s))
+        self._preprocessed.append(self._preprocess(frame))
+
+    def build(self) -> dict[str, Any]:
+        if not self._map_name:
+            raise RuntimeError("no mapping run started")
+        torch = self._torch
+        images = torch.stack(self._preprocessed, dim=0).to(self._device)
+        num_frames = int(images.shape[0])
+        keyframe_interval = 1 if num_frames <= 320 else (num_frames + 319) // 320
+        dtype = (
+            torch.bfloat16
+            if self._device == "cuda" and torch.cuda.get_device_capability()[0] >= 8
+            else torch.float32
+        )
+        logger.info(
+            "reconstructing %s: %d frames, keyframe_interval=%d, dtype=%s",
+            self._map_name,
+            num_frames,
+            keyframe_interval,
+            str(dtype),
+        )
+        with torch.no_grad(), torch.amp.autocast(
+            self._device, dtype=dtype, enabled=self._device == "cuda"
+        ):
+            predictions = self._model.inference_streaming(
+                images,
+                num_scale_frames=8,
+                keyframe_interval=keyframe_interval,
+                output_device=torch.device("cpu"),
+            )
+        return self._serialize(self._map_name, predictions)
+
+    def _preprocess(self, frame: np.ndarray) -> Any:
+        """Resize one RGB frame to the model input (patch-aligned, cropped)."""
+        torch = self._torch
+        image = Image.fromarray(np.asarray(frame, dtype=np.uint8))
+        width, height = image.size
+        new_width = 512
+        new_height = round(height * (new_width / width) / 14) * 14
+        image = image.resize((new_width, new_height), Image.Resampling.BICUBIC)
+        tensor = torch.from_numpy(np.asarray(image)).permute(2, 0, 1).float() / 255.0
+        if new_height > 512:
+            start_y = (new_height - 512) // 2
+            tensor = tensor[:, start_y : start_y + 512, :]
+        return tensor
+
+    def _serialize(self, map_name: str, predictions: dict[str, Any]) -> dict[str, Any]:
+        torch = self._torch
+        map_dir = self._output_dir / map_name
+        frames_dir = map_dir / "frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        for index, frame in enumerate(self._source_frames):
+            Image.fromarray(np.asarray(frame, dtype=np.uint8)).save(
+                frames_dir / f"{index:06d}.png"
+            )
+
+        from lingbot_map.utils.pose_enc import pose_encoding_to_extri_intri
+
+        pose_enc = predictions["pose_enc"]
+        image_shape = tuple(predictions["depth"].shape[-3:-1])
+        extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, image_shape)
+        # pose_enc yields camera-to-world; invert to world-to-camera extrinsics.
+        extrinsic_4x4 = torch.zeros(
+            (*extrinsic.shape[:-2], 4, 4),
+            device=extrinsic.device,
+            dtype=extrinsic.dtype,
+        )
+        extrinsic_4x4[..., :3, :4] = extrinsic
+        extrinsic_4x4[..., 3, 3] = 1.0
+        from lingbot_map.utils.geometry import closed_form_inverse_se3_general
+
+        extrinsic_4x4 = closed_form_inverse_se3_general(extrinsic_4x4)
+        extrinsic_np = extrinsic_4x4[..., :3, :4].detach().cpu().numpy()
+        intrinsic_np = intrinsic.detach().cpu().numpy()
+
+        points = predictions.get("world_points")
+        points_conf = predictions.get("world_points_conf")
+        if points is not None:
+            points_np = points.detach().cpu().numpy()
+            conf_np = (
+                points_conf.detach().cpu().numpy()
+                if points_conf is not None
+                else np.ones(points_np.shape[:-1], dtype=np.float32)
+            )
+            np.save(map_dir / "world_points.npy", points_np)
+            np.save(map_dir / "world_points_conf.npy", conf_np)
+        depth = predictions.get("depth")
+        if depth is not None:
+            np.save(map_dir / "depth.npy", depth.detach().cpu().numpy())
+
+        poses = [
+            {"pose": pose, "timestamp_s": timestamp}
+            for pose, timestamp in zip(self._poses, self._timestamps, strict=True)
+        ]
+        (map_dir / "poses.json").write_text(json.dumps(poses))
+        metadata = {
+            "backend": "gct_stream",
+            "map_name": map_name,
+            "frames": len(self._source_frames),
+            "cameras": {
+                "extrinsic": extrinsic_np.tolist(),
+                "intrinsic": intrinsic_np.tolist(),
+            },
+        }
+        (map_dir / "map.json").write_text(json.dumps(metadata))
+        logger.info(
+            "built map %s with %d frames", map_name, len(self._source_frames)
+        )
+        return {
+            "map_path": str(map_dir),
+            "frames": len(self._source_frames),
+            "metadata": metadata,
+        }
 
 
 class LingBotMapFacade(RpcFacade):
@@ -258,6 +451,12 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Directory for built map artifacts (default: LINGBOTMAP_OUTPUT_DIR)",
     )
     parser.add_argument(
+        "--checkpoint",
+        default=None,
+        help="LingBot-Map GCT checkpoint path (default: LINGBOTMAP_CHECKPOINT_PATH); "
+        "unset falls back to the frame-archive backend",
+    )
+    parser.add_argument(
         "--parent-watch",
         action="store_true",
         help="watch parent process via stdin pipe and exit when it dies",
@@ -275,6 +474,8 @@ def main() -> None:
             "map output directory is not set; pass --output-dir or export "
             "LINGBOTMAP_OUTPUT_DIR before starting RPent"
         )
+    if args.checkpoint:
+        os.environ["LINGBOTMAP_CHECKPOINT_PATH"] = args.checkpoint
     facade = LingBotMapFacade(build_lingbot_backend(output_dir))
     facade.serve(
         transport=args.transport,

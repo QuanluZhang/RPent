@@ -120,3 +120,86 @@ LeKiwi 可以在操作者遥控底盘的同时构建工作空间的地图。该�
 **流程。** 规划器调用 ``build_map(map_name, labels)``。该工具会开启建图会话，请操作者缓慢地遥控底盘绕行工作空间（一个轮询线程在操作者驾驶期间推送同步的前置帧和底盘位姿），并在操作者回复后完成地图构建。若给出了 ``labels``，每个标签都会在保存的关键帧上检测并分割，然后标注到地图上。``detect_objects(labels, step)`` 可以在任意已保存的相机帧上独立运行同一感知能力。
 
 由于 LeKiwi 环境只上报实测速度而没有里程计位姿，帧在推送时不携带位姿，由建图服务从帧本身估计位姿。上述安全规则在遥控扫描期间同样适用。
+
+手动启动建图服务
+~~~~~~~~~~~~~~~~
+
+想单独检查建图服务端，或把它运行在另一台机器上时，可以自行启动：
+
+.. code-block:: bash
+
+   LINGBOTMAP_OUTPUT_DIR=/path/to/maps \
+       python -m rpent.robots.components.lingbotmap_server \
+       --transport http --host 127.0.0.1 --port 8116
+
+构建出的地图会写入 ``LINGBOTMAP_OUTPUT_DIR``（或 ``--output-dir``）之下，每张地图一个目录，内含 ``frames/*.png``、``poses.json`` 和 ``map.json``。把服务端地址传给 RPent 即可接入：
+
+.. code-block:: bash
+
+   rpent --robot lekiwi ... --map-endpoint http://127.0.0.1:8116
+
+准备感知服务
+~~~~~~~~~~~~
+
+感知服务端需要 CUDA GPU、``grounding-sam2`` extra 和两个模型权重：
+
+.. code-block:: bash
+
+   uv pip install -e '.[grounding-sam2]'
+
+   # Grounding DINO：必须使用官方 release 的原始权重。
+   # Hugging Face 上 transformers 格式的 model.safetensors 无法加载。
+   wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth \
+       -P /path/to/checkpoints
+
+   # SAM 2：中国大陆用户可在前面加 HF_ENDPOINT=https://hf-mirror.com
+   hf download facebook/sam2.1-hiera-large sam2.1_hiera_large.pt \
+       --local-dir /path/to/checkpoints
+
+   export GDINO_CHECKPOINT_PATH=/path/to/checkpoints/groundingdino_swint_ogc.pth
+   export SAM2_CHECKPOINT_PATH=/path/to/checkpoints/sam2.1_hiera_large.pt
+
+不要改动权重文件名：服务端会根据文件名选择 SAM 2 的模型配置。然后启动服务端，并用 ``--gdino-sam2-endpoint http://127.0.0.1:8115`` 接入 RPent：
+
+.. code-block:: bash
+
+   python -m rpent.robots.components.gdino_sam2_server \
+       --transport http --host 127.0.0.1 --port 8115
+
+手动测试服务
+~~~~~~~~~~~~
+
+两个服务端响应的都是普通 RPC 调用，接入运行之前用几行 Python 就能确认服务是否正常。对建图服务端，推入若干合成帧并构建：
+
+.. code-block:: python
+
+   import numpy as np
+   from rpent.robots.components.lingbotmap_client import LingBotMapClient
+   from rpent.utils.rpc.http_rpc import HttpRpcClient
+
+   client = LingBotMapClient(HttpRpcClient("http://127.0.0.1:8116"))
+   client.start_session(map_name="smoke_test")
+   for index in range(10):
+       frame = np.zeros((480, 640, 3), dtype=np.uint8)
+       frame[:, :, index % 3] = 60 + index  # 合成帧；真实运行推入的是相机帧
+       client.push_frame(frame, pose=None, timestamp_s=index * 0.5)
+   result = client.build()
+   print(result.map_path, result.frames)  # .../maps/smoke_test 10
+
+构建成功会打印地图目录和帧数；目录中是归档的帧和 ``map.json``。若要丢弃会话，改调 ``client.stop_session()``。
+
+对感知服务端，在任意本地照片上运行检测：
+
+.. code-block:: python
+
+   import imageio
+   from rpent.robots.components.gdino_sam2_client import GdinoSam2Client
+   from rpent.utils.rpc.http_rpc import HttpRpcClient
+
+   client = GdinoSam2Client(HttpRpcClient("http://127.0.0.1:8115"))
+   image = imageio.imread("photo.jpg")
+   result = client.detect_segment(image, labels=["chair", "desk"])
+   for detection in result.detections:
+       print(detection.label, round(detection.score, 2), detection.box)
+
+每个检测结果打印匹配的标签、置信度和 ``[x1, y1, x2, y2]`` 像素框；帧中没有匹配标签时 ``result.detections`` 为空。第一次调用会较慢，因为两个模型要完成首次推理。
