@@ -42,26 +42,10 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 ``drive`` 的速度上限（这是人为策略，无法探测——从默认值起步，逐步放宽）。
 只探测其中一侧时可以加 ``--skip-motors`` 或 ``--skip-cameras``。
 
-如果想手工填写，可以在机器人板载计算机上用下面的命令找出各个值：
-
-.. code-block:: bash
-
-   # 轮电机串口：STS3215 控制板枚举为一个 USB 串行适配器。
-   # /dev/serial/by-id 名称在重新插拔后不变；裸 tty 节点可能重新编号。
-   ls -l /dev/serial/by-id/
-   lerobot-find-port            # 对总线执行 ping；三个轮电机应答 ID 为 7、8、9
-
-   # 前置摄像头：选 *-index0 节点（其余是元数据节点）。
-   ls -l /dev/v4l2/by-id/
-   v4l2-ctl --list-devices      # 人类可读的摄像头名称
-
-``robot.port`` 两种写法都接受，但 ``/dev/serial/by-id`` 路径更稳定。摄像头的
-``serial`` 可以填完整的 ``/dev/v4l2/by-id/...`` 路径，重新插拔后设备不会漂移；
-填数字摄像头索引也可以，但索引会随插拔顺序变化。整体结构可以参考
-``robots/lekiwi/config/example.yaml``。有且仅有一个摄像头设备可以设置
-``main: true``，它的名字会成为 ``main_image_key``。``drive`` 一节的键就是
-RLinf 环境字段，会按 RLinf 的 ``LeKiwiEnvConfig`` 校验：未知键会在启动时报
-错，而不是被静默忽略。
+整体结构可以参考 ``robots/lekiwi/config/example.yaml``。有且仅有一个摄像头设备
+可以设置 ``main: true``，它的名字会成为 ``main_image_key``。``drive`` 一节的
+键就是 RLinf 环境字段，会按 RLinf 的 ``LeKiwiEnvConfig`` 校验：未知键会在启动
+时报错，而不是被静默忽略。
 
 命令探测不到的字段都是人为选择：几何参数 ``wheel_radius``、``base_radius``
 来自量尺，``max_raw`` 是舵机的原始速度上限、默认值为 3000，``drive`` 的速度
@@ -73,16 +57,14 @@ RLinf 环境字段，会按 RLinf 的 ``LeKiwiEnvConfig`` 校验：未知键会�
 启动环境服务端
 --------------
 
-在机器人板载计算机上，先导出节点序号再启动 Ray——Ray 会在启动时捕获环境变量——然后在能被控制端访问的网卡上运行环境服务端：
+在机器人板载计算机上，在能被控制端访问的网卡上运行环境服务端：
 
 .. code-block:: bash
 
-   export RLINF_NODE_RANK=0
-   ray start --head
    python -m robots.lekiwi.env_server --robot-config /path/to/robot.yaml \
      --transport http --host 0.0.0.0 --port 8120
 
-服务端会在一个 Ray 分组里拉起 RLinf 的 ``RealWorldEnv`` worker，连接轮电机串口和摄像头，并提供 ``env.*`` 的 RPC 方法。可以用 ``--print-config`` 打印解析后的 RLinf 配置并退出，不接触硬件。用 SIGINT 停止服务端；worker 在退出时会停止轮子。
+服务端在自己的进程里持有 RLinf 的 ``RealWorldEnv``。它直接连接轮电机串口和摄像头，并提供 ``env.*`` 的 RPC 方法。可以用 ``--print-config`` 打印解析后的 RLinf 配置并退出，不接触硬件。用 SIGINT 停止服务端；它在退出时会停止轮子。
 
 从控制端接入
 ------------

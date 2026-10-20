@@ -64,28 +64,11 @@ with a ruler, in meters) and the ``drive`` limits (policy, not discovery —
 start from the defaults and raise them gradually). Pass ``--skip-motors`` or
 ``--skip-cameras`` to probe only one side.
 
-To fill the fields by hand instead, find each value on the robot's computer:
-
-.. code-block:: bash
-
-   # Wheel bus: the STS3215 board enumerates as a USB serial adapter.
-   # /dev/serial/by-id names survive replugging; plain tty nodes renumber.
-   ls -l /dev/serial/by-id/
-   lerobot-find-port            # pings the bus; the wheels answer at IDs 7, 8, 9
-
-   # Front camera: pick the *-index0 node (the rest are metadata nodes).
-   ls -l /dev/v4l2/by-id/
-   v4l2-ctl --list-devices      # human-readable camera names
-
-``robot.port`` accepts either spelling, but the ``/dev/serial/by-id`` path is
-the stable one. The camera ``serial`` accepts the full ``/dev/v4l2/by-id/...``
-path, which pins the device across replugs; a numeric camera index also works
-but renumbers with plug order. Copy ``robots/lekiwi/config/example.yaml``
-outside versioned source for the overall shape. Exactly one camera device must
-set ``main: true``; its name becomes ``main_image_key``. The ``drive``
-section's keys are RLinf environment fields and are validated against the
-RLinf ``LeKiwiEnvConfig``: an unknown key fails at startup instead of being
-silently ignored.
+Copy ``robots/lekiwi/config/example.yaml`` outside versioned source for the
+overall shape. Exactly one camera device must set ``main: true``; its name
+becomes ``main_image_key``. The ``drive`` section's keys are RLinf environment
+fields and are validated against the RLinf ``LeKiwiEnvConfig``: an unknown key
+fails at startup instead of being silently ignored.
 
 The fields no command can discover are deliberate choices: geometry
 (``wheel_radius``, ``base_radius``) comes from a ruler, ``max_raw`` (default
@@ -101,22 +84,18 @@ and reports what the camera sees. Pass the task with ``--task-id``.
 Start the environment server
 ----------------------------
 
-On the robot's computer, start Ray with the node rank exported — Ray captures
-the environment when it starts — then run the env server bound to the
-interface the agent machine can reach:
+On the robot's computer, run the env server bound to the interface the agent
+machine can reach:
 
 .. code-block:: bash
 
-   export RLINF_NODE_RANK=0
-   ray start --head
    python -m robots.lekiwi.env_server --robot-config /path/to/robot.yaml \
      --transport http --host 0.0.0.0 --port 8120
 
-The server launches the RLinf ``RealWorldEnv`` worker in a Ray group, connects
-the wheel bus and the camera, and serves the ``env.*`` RPC methods. Use
-``--print-config`` to print the resolved RLinf configuration and exit without
-touching hardware. Stop the server with SIGINT; the worker stops the wheels on
-shutdown.
+The server owns the RLinf ``RealWorldEnv`` in its own process. It connects the wheel bus and the
+camera directly and serves the ``env.*`` RPC methods. Use ``--print-config``
+to print the resolved RLinf configuration and exit without touching hardware.
+Stop the server with SIGINT; it stops the wheels on shutdown.
 
 Attach from the agent machine
 -----------------------------

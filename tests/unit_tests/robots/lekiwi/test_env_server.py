@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
+import sys
 import threading
+import types
+from typing import Any
 
 import numpy as np
 
@@ -82,3 +85,66 @@ def test_lekiwi_facade_registers_readonly_observation_routes():
     assert "env.get_camera_meta" in readonly
     assert "env.drive" not in readonly
     assert "env.stop" not in readonly
+
+
+def test_local_worker_info_owns_hardware_in_process(
+    fake_rlinf_realworld_modules, monkeypatch
+):
+    # The server runs without Ray: the WorkerInfo it hands the env must keep
+    # every part local (node_rank=None everywhere), where RobotPart.connect
+    # opens devices in-process instead of hosting scheduler workers.
+    from robots.lekiwi.env_server import _local_worker_info
+    from robots.lekiwi.runtime_config import load_runtime_config
+
+    class FakeDataclass:
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+    captured: dict[str, Any] = {}
+
+    def fake_lekiwi_config(**kwargs: Any) -> Any:
+        captured["lekiwi_config"] = kwargs
+        return FakeDataclass(**kwargs)
+
+    def fake_robot_info(**kwargs: Any) -> Any:
+        captured["robot_info"] = kwargs
+        return FakeDataclass(**kwargs)
+
+    def fake_worker_info(**kwargs: Any) -> Any:
+        captured["worker_info"] = kwargs
+        return FakeDataclass(**kwargs)
+
+    class FakeAcceleratorType:
+        NO_ACCEL = "NO_ACCEL"
+
+    def fake_worker_address(_name: str, _rank: int) -> Any:
+        return object()
+
+    discovery = types.ModuleType("rlinf.robotics.discovery")
+    discovery.RobotInfo = fake_robot_info
+    monkeypatch.setitem(sys.modules, "rlinf.robotics.discovery", discovery)
+    scheduler = types.ModuleType("rlinf.scheduler")
+    scheduler.AcceleratorType = FakeAcceleratorType
+    scheduler.WorkerAddress = fake_worker_address
+    scheduler.WorkerInfo = fake_worker_info
+    monkeypatch.setitem(sys.modules, "rlinf.scheduler", scheduler)
+
+    example = (
+        __import__("pathlib").Path(__file__).parents[4]
+        / "robots/lekiwi/config/example.yaml"
+    )
+    runtime = load_runtime_config(example)
+
+    # Swap the recording stand-in in only after config loading, which
+    # validates keys against the fixture's dataclass fields.
+    robots_lekiwi = sys.modules["rlinf.robotics.robots.lekiwi"]
+    monkeypatch.setattr(robots_lekiwi, "LeKiwiConfig", fake_lekiwi_config)
+
+    _local_worker_info(runtime.rlinf)
+
+    # Local ownership: no node rank on the hardware config, none on the worker.
+    assert captured["lekiwi_config"]["node_rank"] is None
+    assert captured["worker_info"]["cluster_node_rank"] is None
+    # The robot itself rides the worker's hardware slot the env reads.
+    assert len(captured["worker_info"]["hardware_infos"]) == 1
+    assert captured["robot_info"]["type"] == "LeKiwi"
