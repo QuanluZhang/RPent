@@ -24,14 +24,16 @@ from robots.lekiwi import tools as lekiwi_tools
 from rpent.dashboard.events import DashboardEventSink
 from rpent.session import EnvState
 from rpent.tools import ToolResult, iter_tools
+from rpent.tools.mapping import MappingMixin
 from rpent.tools.toolkit import Toolkit
 from rpent.utils.logging import get_output_dir
 
 if TYPE_CHECKING:
     from rpent.memory.manager import MemoryManager
+    from rpent.tools.human_in_the_loop import HumanInTheLoopInput
 
 
-class LeKiwiToolkit(Toolkit):
+class LeKiwiToolkit(MappingMixin, Toolkit):
     """Common RPent tools plus safe LeKiwi planner primitives."""
 
     _tools_module = lekiwi_tools
@@ -44,6 +46,7 @@ class LeKiwiToolkit(Toolkit):
         dashboard_events: DashboardEventSink,
         memory: MemoryManager,
         state_output_dir: Path | str | None = None,
+        operator_input: HumanInTheLoopInput | None = None,
     ) -> None:
         runtime_kwargs = dict(runtime_kwargs)
         state = EnvState(Path(state_output_dir or get_output_dir()))
@@ -52,6 +55,9 @@ class LeKiwiToolkit(Toolkit):
             state=state,
             memory=memory,
         )
+        self._lingbotmap_client = runtime_kwargs.pop("lingbotmap_client", None)
+        self._gdino_sam2_client = runtime_kwargs.pop("gdino_sam2_client", None)
+        self._operator_input = operator_input
         self._primitives = self._primitives_cls(
             check_cancelled=self.raise_if_cancelled,
             **runtime_kwargs,
@@ -73,6 +79,22 @@ class LeKiwiToolkit(Toolkit):
             self.add_tool(
                 definition.with_handler(partial(definition, state=self._state))
             )
+        if self._lingbotmap_client is not None:
+            self.register_mapping_tools()
+
+    def _map_frame(self) -> tuple[Any, list[float] | None, float]:
+        """Return the current front RGB frame, base pose, and timestamp.
+
+        The LeKiwi env reports measured body velocity only, so the base pose
+        stays ``None`` and the mapping service estimates pose from frames.
+        """
+        import time as _time
+
+        observation = self._primitives.env.get_observation()
+        frame = observation.get("main_images")
+        if frame is None:
+            raise RuntimeError("LeKiwi observation has no main_images frame")
+        return frame, None, _time.time()
 
     def solved(self) -> bool:
         """The velocity-controlled base reports no success signal of its own."""

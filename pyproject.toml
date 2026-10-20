@@ -171,6 +171,16 @@ lekiwi = [
     "opencv-python-headless",
     "imageio[ffmpeg]",
 ]
+grounding-sam2 = [
+    # Local Grounding DINO + SAM 2 perception server for map labeling and the
+    # standalone detect_objects tool. Install into a CUDA environment and
+    # export GDINO_CHECKPOINT_PATH / SAM2_CHECKPOINT_PATH before starting it.
+    "groundingdino-py @ git+https://github.com/IDEA-Research/GroundingDINO.git",
+    "sam2 @ git+https://github.com/RLinf/sam2.git@main",
+    "torch",
+    "torchvision",
+    "pillow>=10",
+]
 robotwin = [
     "rpent[rlinf]",
     "rlinf-robotwin-runtime==0.1.3",

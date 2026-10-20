@@ -59,10 +59,16 @@ LEKIWI_DASHBOARD_SPEC: DashboardSpec = {
         "display": "LeKiwi task {task_id}",
         "output_slug": "lekiwi_t{task_id}",
     },
-    "runtime_components": ({"name": "env", "label": "LEKIWI", "scope": "unique"},),
+    "runtime_components": (
+        {"name": "env", "label": "LEKIWI", "scope": "unique"},
+        {"name": "map", "label": "MAP", "scope": "shared"},
+        {"name": "perception", "label": "DINO+SAM2", "scope": "shared"},
+    ),
     "primitives": (
         "drive",
         "stop",
+        "build_map",
+        "detect_objects",
     ),
 }
 
@@ -86,6 +92,8 @@ def get_toolkit(
     runtime_kwargs: dict[str, Any],
     dashboard_events: DashboardEventSink,
     config: RunConfig,
+    state_output_dir: Path | str | None = None,
+    operator_input: Any = None,
 ):
     """Return the LeKiwi toolkit."""
     from robots.lekiwi.toolkit import LeKiwiToolkit
@@ -97,6 +105,8 @@ def get_toolkit(
         runtime_kwargs=runtime_kwargs,
         dashboard_events=dashboard_events,
         memory=memory,
+        state_output_dir=state_output_dir,
+        operator_input=operator_input,
     )
 
 
@@ -116,6 +126,19 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
         "--robot-config",
         default=None,
         help="LeKiwi site YAML (port, camera serials, velocity limits)",
+    )
+    parser.add_argument(
+        "--map-endpoint",
+        default=None,
+        help="LingBot-Map server URL (http://host:port); omit to disable build_map",
+    )
+    parser.add_argument(
+        "--gdino-sam2-endpoint",
+        default=None,
+        help=(
+            "Grounding DINO + SAM 2 server URL (http://host:port); omit to "
+            "disable map labeling and detect_objects"
+        ),
     )
 
 
@@ -189,6 +212,64 @@ def _spawn_env_server(
     return daemon, HttpRpcClient(f"http://{host}:{port}")
 
 
+def _spawn_lingbotmap_server(
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> tuple[ProcessDaemon | None, RpcClient]:
+    """Spawn (or attach to) the LingBot-Map mapping server."""
+    if args.map_endpoint is not None:
+        return None, make_rpc_client(args.map_endpoint)
+    host, port = "127.0.0.1", pick_free_port()
+    daemon = ProcessDaemon(
+        name="lingbotmap_server",
+        cmd=[
+            sys.executable,
+            "-m",
+            "rpent.robots.components.lingbotmap_server",
+            "--transport",
+            "http",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--output-dir",
+            str(output_dir / "maps"),
+            "--parent-watch",
+        ],
+        log_path=str(output_dir / "lingbotmap_server.log"),
+    )
+    daemon.start()
+    return daemon, HttpRpcClient(f"http://{host}:{port}")
+
+
+def _spawn_gdino_sam2_server(
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> tuple[ProcessDaemon | None, RpcClient]:
+    """Spawn (or attach to) the Grounding DINO + SAM 2 perception server."""
+    if args.gdino_sam2_endpoint is not None:
+        return None, make_rpc_client(args.gdino_sam2_endpoint)
+    host, port = "127.0.0.1", pick_free_port()
+    daemon = ProcessDaemon(
+        name="gdino_sam2_server",
+        cmd=[
+            sys.executable,
+            "-m",
+            "rpent.robots.components.gdino_sam2_server",
+            "--transport",
+            "http",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--parent-watch",
+        ],
+        log_path=str(output_dir / "gdino_sam2_server.log"),
+    )
+    daemon.start()
+    return daemon, HttpRpcClient(f"http://{host}:{port}")
+
+
 def _init_runtime(
     args: argparse.Namespace,
     output_dir: Path,
@@ -197,21 +278,33 @@ def _init_runtime(
 ) -> tuple[list[ProcessDaemon], dict[str, Any]]:
     """Initialize the LeKiwi env component, or only ``components`` when given."""
     from robots.lekiwi.env_client import LeKiwiEnvClient
+    from rpent.robots.components.gdino_sam2_client import GdinoSam2Client
+    from rpent.robots.components.lingbotmap_client import LingBotMapClient
 
-    available = {"env"}
-    selected = available if components is None else components
+    available = {"env", "map", "perception"}
+    selected = set(available) if components is None else set(components)
+    # The mapping services stay optional: they activate through explicit
+    # endpoints, so a run without them never spawns or waits on their servers.
+    if args.map_endpoint is None:
+        selected.discard("map")
+    if args.gdino_sam2_endpoint is None:
+        selected.discard("perception")
     unknown = selected.difference(available)
     if unknown:
         raise ValueError(f"unknown LeKiwi runtime components: {sorted(unknown)}")
 
     starters = {
         "env": lambda: _spawn_env_server(args, output_dir),
+        "map": lambda: _spawn_lingbotmap_server(args, output_dir),
+        "perception": lambda: _spawn_gdino_sam2_server(args, output_dir),
     }
     connectors = {
         "env": lambda rpc: {
             "env": LeKiwiEnvClient(rpc),
             "task_description": get_lekiwi_task(args.task_id).instruction,
         },
+        "map": lambda rpc: {"lingbotmap_client": LingBotMapClient(rpc)},
+        "perception": lambda rpc: {"gdino_sam2_client": GdinoSam2Client(rpc)},
     }
 
     owned_daemons: dict[str, ProcessDaemon] = {}

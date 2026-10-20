@@ -107,3 +107,16 @@ RLinf 环境字段，会按 RLinf 的 ``LeKiwiEnvConfig`` 校验：未知键会�
 --------
 
 底盘没有碰撞传感器，也没有板载避障：清场是操作者的责任。每次运行前清理底盘周围的地面，把站点 YAML 中的速度上限保持保守，并确保操作者随时够得到底盘的电源开关。如果摄像头画面或上报的轮速看起来不对，立即停止运行——从 Dashboard 或终端发起一次 ``env.stop`` 只有一次 RPC 调用的距离。
+
+工作空间建图
+------------
+
+LeKiwi 可以在操作者遥控底盘的同时构建工作空间的地图。该能力是跨机器人的，位于 RPent 的共享组件中；只要两个建图服务可达，LeKiwi 的工具箱就会启用它。
+
+**服务。** ``rpent.robots.components.lingbotmap_server`` 通过 RPC 持有一个 LingBot-Map 建图会话（开始、推送帧、构建、停止）。默认情况下它把推入的帧和位姿归档为地图产物；当安装了 ``lingbotmap`` 包时则改用该包。``rpent.robots.components.gdino_sam2_server`` 把 Grounding DINO（开放词汇检测）和 SAM 2（掩码细化）封装为一次 ``gdino_sam2.detect_segment`` 调用。两个服务端都是可选的：只有配置了端点才会启用。
+
+**启用方式。** 传入 ``--map-endpoint`` 以暴露 ``build_map``；再传入 ``--gdino-sam2-endpoint`` 可额外暴露 ``detect_objects`` 和地图标注。两个参数既接受已运行服务端的 URL，也可以在未给出端点时在本地拉起服务端。对于感知服务端，需要先在 CUDA 环境中安装 ``grounding-sam2`` extra 并导出 ``GDINO_CHECKPOINT_PATH`` 和 ``SAM2_CHECKPOINT_PATH``。
+
+**流程。** 规划器调用 ``build_map(map_name, labels)``。该工具会开启建图会话，请操作者缓慢地遥控底盘绕行工作空间（一个轮询线程在操作者驾驶期间推送同步的前置帧和底盘位姿），并在操作者回复后完成地图构建。若给出了 ``labels``，每个标签都会在保存的关键帧上检测并分割，然后标注到地图上。``detect_objects(labels, step)`` 可以在任意已保存的相机帧上独立运行同一感知能力。
+
+由于 LeKiwi 环境只上报实测速度而没有里程计位姿，帧在推送时不携带位姿，由建图服务从帧本身估计位姿。上述安全规则在遥控扫描期间同样适用。

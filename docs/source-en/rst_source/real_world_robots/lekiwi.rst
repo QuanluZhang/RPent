@@ -154,3 +154,39 @@ velocity limits in the site YAML conservative, and keep an operator within
 reach of the base's power switch. If the camera view or the reported velocity
 looks wrong, stop the run — an ``env.stop`` is one RPC call away from the
 dashboard or terminal.
+
+Workspace mapping
+-----------------
+
+LeKiwi can build a map of a workspace while an operator teleoperates the base.
+The capability is robot-agnostic and lives in shared RPent components; the
+LeKiwi toolkit adopts it when the two mapping services are reachable.
+
+**Services.** ``rpent.robots.components.lingbotmap_server`` owns a LingBot-Map
+mapping session (start, push frames, build, stop) over RPC. By default it
+archives pushed frames and poses as the map artifact; when the ``lingbotmap``
+package is installed it is used instead.
+``rpent.robots.components.gdino_sam2_server`` wraps Grounding DINO (open-
+vocabulary detection) and SAM 2 (mask refinement) behind one
+``gdino_sam2.detect_segment`` call. Both servers are optional: they activate
+only when their endpoints are configured.
+
+**Activation.** Pass ``--map-endpoint`` to expose ``build_map``; pass
+``--gdino-sam2-endpoint`` additionally to expose ``detect_objects`` and map
+labeling. Both flags accept an existing server URL or spawn a local server
+when no endpoint is given. For the perception server, export
+``GDINO_CHECKPOINT_PATH`` and ``SAM2_CHECKPOINT_PATH`` and install the
+``grounding-sam2`` extra in a CUDA environment first.
+
+**Flow.** The agent calls ``build_map(map_name, labels)``. The tool opens a
+mapping session, asks the operator to teleoperate the base slowly around the
+workspace (a poller thread pushes synchronized front frames and the base pose
+while they drive), and finalizes the map when the operator replies. With
+``labels`` given, each label is detected and segmented on saved keyframes and
+annotated onto the map. ``detect_objects(labels, step)`` runs the same
+perception standalone on any persisted camera frame.
+
+Since the LeKiwi environment reports measured velocity but no odometry pose,
+frames are pushed without one and the mapping service estimates pose from
+frames alone. The safety rules above apply unchanged during the teleoperation
+sweep.
