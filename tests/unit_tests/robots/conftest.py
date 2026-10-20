@@ -199,6 +199,17 @@ def fake_rlinf_realworld_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeLeKiwiEnv:
         pass
 
+    class FakeLeKiwiDriveEnv(FakeLeKiwiEnv):
+        """Converts ``override_cfg`` kwargs, as the real drive env does."""
+
+        def __init__(
+            self,
+            override_cfg: dict | None = None,
+            *_: Any,
+            **__: Any,
+        ) -> None:
+            pass
+
     modules = {
         "rlinf": _fake_module("rlinf", __path__=[]),
         "rlinf.envs": _fake_module("rlinf.envs", __path__=[]),
@@ -226,6 +237,10 @@ def fake_rlinf_realworld_modules(monkeypatch: pytest.MonkeyPatch) -> None:
             "rlinf.envs.real.lekiwi.base",
             LeKiwiEnv=FakeLeKiwiEnv,
             LeKiwiEnvConfig=dataclass_for("LeKiwiEnvConfig", lekiwi_robot_fields),
+        ),
+        "rlinf.envs.real.lekiwi.drive": _fake_module(
+            "rlinf.envs.real.lekiwi.drive",
+            LeKiwiDriveEnv=FakeLeKiwiDriveEnv,
         ),
         "rlinf.robotics": _fake_module("rlinf.robotics", __path__=[]),
         "rlinf.robotics.parts": _fake_module("rlinf.robotics.parts", __path__=[]),

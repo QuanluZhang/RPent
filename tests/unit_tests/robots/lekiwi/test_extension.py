@@ -83,6 +83,28 @@ def test_rpent_lekiwi_registration_exists(fake_rlinf_realworld_modules):
     assert gym.spec("RPentLeKiwiDriveEnv-v1") is not None
 
 
+def test_rpent_lekiwi_env_accepts_override_cfg_dict(
+    fake_rlinf_realworld_modules,
+):
+    # RealWorldEnv creates envs with an override_cfg dict, not a config
+    # object; the wrapper must ride LeKiwiDriveEnv's dict conversion rather
+    # than LeKiwiEnv's config-object constructor. This failed on the robot
+    # with "unexpected keyword argument 'override_cfg'".
+    from robots.lekiwi.rpent_env import RPentLeKiwiEnv
+
+    env = RPentLeKiwiEnv(
+        {
+            "enable_camera_player": False,
+            "step_frequency": 10.0,
+            "camera_names": {"cam-0": "front"},
+        },
+        None,
+        None,
+        0,
+    )
+    assert env is not None
+
+
 def test_live_observation_delegates_to_rlinf_env(fake_rlinf_realworld_modules):
     from robots.lekiwi.rpent_env import RPentLeKiwiEnv
 

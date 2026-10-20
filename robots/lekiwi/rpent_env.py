@@ -21,12 +21,19 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 from gymnasium.envs.registration import register
-from rlinf.envs.real.lekiwi.base import LeKiwiEnv
+from rlinf.envs.real.lekiwi.base import LeKiwiEnvConfig
+from rlinf.envs.real.lekiwi.drive import LeKiwiDriveEnv
 from rlinf.envs.real.wrappers import build_stack
 
 
-class RPentLeKiwiEnv(LeKiwiEnv):
-    """LeKiwiEnv variant used as the RPent real-robot contract."""
+class RPentLeKiwiEnv(LeKiwiDriveEnv):
+    """LeKiwiDriveEnv variant used as the RPent real-robot contract.
+
+    ``LeKiwiDriveEnv`` converts the ``override_cfg`` dict into a
+    ``LeKiwiEnvConfig`` and names the task; this subclass adds the live
+    reads, camera identity, and immediate stop that RPent's RPC facade
+    serves.
+    """
 
     def get_live_observation(self) -> dict[str, Any]:
         """Refresh the sensors once without commanding motion."""
