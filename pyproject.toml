@@ -176,7 +176,7 @@ grounding-sam2 = [
     # standalone detect_objects tool. Install into a CUDA environment and
     # export GDINO_CHECKPOINT_PATH / SAM2_CHECKPOINT_PATH before starting it.
     "groundingdino-py==0.4.0",
-    "sam2 @ git+https://github.com/facebookresearch/sam2.git",
+    "sam-2 @ git+https://github.com/facebookresearch/sam2.git",
     "torch",
     "torchvision",
     "pillow>=10",

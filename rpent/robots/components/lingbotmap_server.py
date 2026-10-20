@@ -199,6 +199,7 @@ class GctStreamBackend:
             kv_cache_include_scale_frames=True,
             use_sdpa=True,
             camera_num_iterations=4,
+            enable_point=True,
         )
         ckpt = torch.load(resolved, map_location=self._device, weights_only=False)
         state_dict = ckpt.get("model", ckpt)
