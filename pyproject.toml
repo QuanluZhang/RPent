@@ -181,6 +181,14 @@ grounding-sam2 = [
     "torchvision",
     "pillow>=10",
 ]
+lingbot-map = [
+    # Real LingBot-Map GCT reconstruction backend for the mapping server.
+    # Install into a CUDA environment and export LINGBOTMAP_CHECKPOINT_PATH
+    # (robbyant/lingbot-map on Hugging Face) to activate it; without the
+    # checkpoint the server falls back to the frame-archive backend.
+    "lingbot-map @ git+https://github.com/Robbyant/lingbot-map.git",
+    "torch",
+]
 robotwin = [
     "rpent[rlinf]",
     "rlinf-robotwin-runtime==0.1.3",

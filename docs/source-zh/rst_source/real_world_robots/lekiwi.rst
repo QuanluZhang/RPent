@@ -128,9 +128,17 @@ LeKiwi 可以在操作者遥控底盘的同时构建工作空间的地图。该�
 
 .. code-block:: bash
 
+   # 可选：用 LingBot-Map GCT 模型做真实重建
+   # （中国大陆用户可在前面加 HF_ENDPOINT=https://hf-mirror.com）
+   hf download robbyant/lingbot-map lingbot-map.pt --local-dir /path/to/checkpoints
+   pip install -e '.[lingbot-map]'
+   export LINGBOTMAP_CHECKPOINT_PATH=/path/to/checkpoints/lingbot-map.pt
+
    LINGBOTMAP_OUTPUT_DIR=/path/to/maps \
        python -m rpent.robots.components.lingbotmap_server \
        --transport http --host 127.0.0.1 --port 8116
+
+导出该权重后，``build_map`` 会返回由 GCT 流式模型计算出的相机位姿、逐帧深度和世界点云。未导出时（默认），服务端把帧和位姿归档为地图产物——工具流程相同，只是没有重建。RPent 会把自身环境透传给它拉起的服务端，因此在启动 RPent 前导出上述变量即可在自动拉起的服务端中启用真实后端。
 
 构建出的地图会写入 ``LINGBOTMAP_OUTPUT_DIR``（或 ``--output-dir``）之下，每张地图一个目录，内含 ``frames/*.png``、``poses.json`` 和 ``map.json``。把服务端地址传给 RPent 即可接入：
 

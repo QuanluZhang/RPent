@@ -199,9 +199,22 @@ run it on a different machine:
 
 .. code-block:: bash
 
+   # Optional: reconstruct real maps with the LingBot-Map GCT model
+   # (add HF_ENDPOINT=https://hf-mirror.com for mainland China users)
+   hf download robbyant/lingbot-map lingbot-map.pt --local-dir /path/to/checkpoints
+   pip install -e '.[lingbot-map]'
+   export LINGBOTMAP_CHECKPOINT_PATH=/path/to/checkpoints/lingbot-map.pt
+
    LINGBOTMAP_OUTPUT_DIR=/path/to/maps \
        python -m rpent.robots.components.lingbotmap_server \
        --transport http --host 127.0.0.1 --port 8116
+
+With the checkpoint exported, :meth:`build_map` returns camera poses,
+per-frame depth, and a world point cloud computed by the GCT streaming model.
+Without it (the default) the server archives frames and poses as the map
+artifact — same tool flow, no reconstruction. RPent passes its environment
+through to the servers it spawns, so exporting the variables above before
+launching RPent activates the real backend in spawned servers too.
 
 Built maps are written under ``LINGBOTMAP_OUTPUT_DIR`` (or ``--output-dir``),
 one directory per map with ``frames/*.png``, ``poses.json``, and ``map.json``.
