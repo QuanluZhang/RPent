@@ -128,11 +128,13 @@ class LeKiwiEnvBackend:
             worker_info=worker_info,
         )
         self.action_dim = int(self.env.action_space.shape[-1])
-        self.velocity_limits = np.asarray(
-            self.env.action_space.high, dtype=np.float32
-        )
         env_config = self.env.env.call("get_wrapper_attr", "config")[0]
         self.step_frequency = float(env_config.step_frequency)
+        # The vector env's action space is batched, (1, 3); clip against the
+        # single-env space so a commanded (3,) velocity stays (3,).
+        self.velocity_limits = np.asarray(
+            self.env.env.single_action_space.high, dtype=np.float32
+        )
 
     def get_env_meta(self) -> dict[str, Any]:
         return {
@@ -239,7 +241,9 @@ class LeKiwiEnvBackend:
         duration_s = min(float(duration_s), self.controller["drive_max_duration_s"])
 
         action = np.clip(
-            requested, self.env.action_space.low, self.env.action_space.high
+            requested,
+            self.velocity_limits * -1.0,
+            self.velocity_limits,
         )
         steps = max(1, int(round(duration_s * self.step_frequency)))
         states: Any = None

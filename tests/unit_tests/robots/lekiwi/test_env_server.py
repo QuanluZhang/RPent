@@ -148,3 +148,90 @@ def test_local_worker_info_owns_hardware_in_process(
     # The robot itself rides the worker's hardware slot the env reads.
     assert len(captured["worker_info"]["hardware_infos"]) == 1
     assert captured["robot_info"]["type"] == "LeKiwi"
+
+
+def test_backend_drive_commands_unbatched_velocity(
+    fake_rlinf_realworld_modules, monkeypatch
+):
+    # Regression: the backend clipped a commanded (3,) velocity against the
+    # vector env's batched (1, 3) action space, which broadcast the action to
+    # (1, 3) and the base rejected it ("Expected velocity shape (3,)").
+    # drive() must send each env a plain (3,) action.
+    import gymnasium as gym
+    import numpy as np
+
+    stepped: list[tuple[tuple[int, ...], ...]] = []
+
+    class FakeInnerEnv:
+        def __init__(self) -> None:
+            self.action_space = gym.spaces.Box(
+                -np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32)
+            )
+            self.config = type("C", (), {"step_frequency": 50.0})
+            self.unwrapped = self
+
+        def get_measured_velocity(self):
+            return np.zeros(3, dtype=np.float32)
+
+        def step(self, action):
+            stepped.append(tuple(np.asarray(action).shape))
+            return ({"states": np.zeros((1, 3), dtype=np.float32)}, 0.0, False, False, {})
+
+    inner = FakeInnerEnv()
+
+    class FakeVector:
+        # Mirrors NoAutoResetSyncVectorEnv: a batched (1, 3) action space that
+        # slices the batch off before stepping each env.
+        def __init__(self) -> None:
+            self.envs = [inner]
+            self._batched = gym.spaces.Box(
+                -np.ones((1, 3), dtype=np.float32), np.ones((1, 3), dtype=np.float32)
+            )
+
+        @property
+        def action_space(self):
+            return self._batched
+
+        @property
+        def single_action_space(self):
+            return inner.action_space
+
+        def call(self, _attr: str, _name: str) -> list[Any]:
+            return [inner.config]
+
+        def step(self, actions):
+            return (inner.step(actions[0])[0], 0.0, False, False, {})
+
+    class FakeRealWorldEnv:
+        def __init__(self, _cfg: Any, **_rest: Any) -> None:
+            self._vector = FakeVector()
+
+        @property
+        def env(self):
+            return self._vector
+
+        @property
+        def action_space(self):
+            return self._vector.action_space
+
+        def step(self, actions):
+            return self._vector.step(actions)
+
+    real_env_module = types.ModuleType("rlinf.envs.real.env")
+    real_env_module.RealWorldEnv = FakeRealWorldEnv
+    monkeypatch.setitem(sys.modules, "rlinf.envs.real.env", real_env_module)
+
+    import robots.lekiwi.env_server as env_server
+
+    monkeypatch.setattr(env_server, "_local_worker_info", lambda _cfg: None)
+    cfg = type("Cfg", (), {"env": type("Env", (), {"eval": None})()})()
+
+    backend = env_server.LeKiwiEnvBackend(
+        cfg=cfg, controller_config={"drive_max_duration_s": 2.0}
+    )
+    result = backend.drive([0.5, 0.0, 0.0], duration_s=0.1)
+
+    assert result["ok"] is True
+    assert stepped, "drive() must step the env at least once"
+    assert all(shape == (3,) for shape in stepped), stepped
+    np.testing.assert_allclose(backend.velocity_limits, [1.0, 1.0, 1.0])
