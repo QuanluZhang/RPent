@@ -189,7 +189,7 @@ class GctStreamBackend:
 
         logger.info("loading LingBot-Map GCTStream: %s", resolved)
         self._model = GCTStream(
-            img_size=512,
+            img_size=518,
             patch_size=14,
             enable_3d_rope=True,
             max_frame_num=1024,
@@ -265,13 +265,13 @@ class GctStreamBackend:
         torch = self._torch
         image = Image.fromarray(np.asarray(frame, dtype=np.uint8))
         width, height = image.size
-        new_width = 512
+        new_width = 518
         new_height = round(height * (new_width / width) / 14) * 14
         image = image.resize((new_width, new_height), Image.Resampling.BICUBIC)
         tensor = torch.from_numpy(np.asarray(image)).permute(2, 0, 1).float() / 255.0
-        if new_height > 512:
-            start_y = (new_height - 512) // 2
-            tensor = tensor[:, start_y : start_y + 512, :]
+        if new_height > 518:
+            start_y = (new_height - 518) // 2
+            tensor = tensor[:, start_y : start_y + 518, :]
         return tensor
 
     def _serialize(self, map_name: str, predictions: dict[str, Any]) -> dict[str, Any]:
