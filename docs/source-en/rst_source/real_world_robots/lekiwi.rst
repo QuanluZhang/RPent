@@ -209,8 +209,9 @@ run it on a different machine:
        python -m rpent.robots.components.lingbotmap_server \
        --transport http --host 127.0.0.1 --port 8116
 
-With the checkpoint exported, :meth:`build_map` returns camera poses,
-per-frame depth, and a world point cloud computed by the GCT streaming model.
+With the checkpoint exported, :meth:`build_map` returns camera poses and
+per-frame depth from the GCT streaming model, plus a world point cloud
+unprojected from that depth.
 Without it (the default) the server archives frames and poses as the map
 artifact — same tool flow, no reconstruction. RPent passes its environment
 through to the servers it spawns, so exporting the variables above before
@@ -245,6 +246,11 @@ checkpoints:
 
    export GDINO_CHECKPOINT_PATH=/path/to/checkpoints/groundingdino_swint_ogc.pth
    export SAM2_CHECKPOINT_PATH=/path/to/checkpoints/sam2.1_hiera_large.pt
+
+The first start also downloads the ``bert-base-uncased`` tokenizer from
+Hugging Face (Grounding DINO's text encoder), so the server needs network
+access then; set ``HF_ENDPOINT=https://hf-mirror.com`` where huggingface.co
+is slow or unreachable.
 
 Keep the checkpoint filenames unchanged: the server picks the SAM 2 model
 config from the filename. Then start it and attach RPent with

@@ -138,7 +138,7 @@ LeKiwi 可以在操作者遥控底盘的同时构建工作空间的地图。该�
        python -m rpent.robots.components.lingbotmap_server \
        --transport http --host 127.0.0.1 --port 8116
 
-导出该权重后，``build_map`` 会返回由 GCT 流式模型计算出的相机位姿、逐帧深度和世界点云。未导出时（默认），服务端把帧和位姿归档为地图产物——工具流程相同，只是没有重建。RPent 会把自身环境透传给它拉起的服务端，因此在启动 RPent 前导出上述变量即可在自动拉起的服务端中启用真实后端。
+导出该权重后，``build_map`` 会返回由 GCT 流式模型计算出的相机位姿和逐帧深度，以及从该深度反投影得到的世界点云。未导出时（默认），服务端把帧和位姿归档为地图产物——工具流程相同，只是没有重建。RPent 会把自身环境透传给它拉起的服务端，因此在启动 RPent 前导出上述变量即可在自动拉起的服务端中启用真实后端。
 
 构建出的地图会写入 ``LINGBOTMAP_OUTPUT_DIR``（或 ``--output-dir``）之下，每张地图一个目录，内含 ``frames/*.png``、``poses.json`` 和 ``map.json``。把服务端地址传给 RPent 即可接入：
 
@@ -166,6 +166,8 @@ LeKiwi 可以在操作者遥控底盘的同时构建工作空间的地图。该�
 
    export GDINO_CHECKPOINT_PATH=/path/to/checkpoints/groundingdino_swint_ogc.pth
    export SAM2_CHECKPOINT_PATH=/path/to/checkpoints/sam2.1_hiera_large.pt
+
+首次启动时还会从 Hugging Face 下载 Grounding DINO 文本编码器所用的 ``bert-base-uncased`` 分词器，因此该步骤需要网络；在 huggingface.co 慢或不可达的环境下可设置 ``HF_ENDPOINT=https://hf-mirror.com``。
 
 不要改动权重文件名：服务端会根据文件名选择 SAM 2 的模型配置。然后启动服务端，并用 ``--gdino-sam2-endpoint http://127.0.0.1:8115`` 接入 RPent：
 
