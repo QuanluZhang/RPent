@@ -265,8 +265,8 @@ Test the Services Manually
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Both servers answer plain RPC calls, so a few lines of Python are enough to
-confirm one is alive before wiring it into a run. For the mapping server,
-push a handful of synthetic frames and build:
+confirm one is alive before wiring it into a run. A quick liveness check for
+the mapping server — push a handful of synthetic frames and build:
 
 .. code-block:: python
 
@@ -286,6 +286,42 @@ push a handful of synthetic frames and build:
 A successful build prints the map directory and the frame count; the
 directory contains the archived frames and ``map.json``. Call
 ``client.stop_session()`` instead of ``build`` to discard a session.
+
+A more realistic check is mapping from a workspace walkthrough video: read
+the video, sample a few frames per second (a walkthrough changes slowly, so
+~5 fps is plenty), and push them as the mapping session:
+
+.. code-block:: python
+
+   import cv2
+   from rpent.robots.components.lingbotmap_client import LingBotMapClient
+   from rpent.utils.rpc.http_rpc import HttpRpcClient
+
+   video = cv2.VideoCapture("workspace_walkthrough.mp4")
+   fps = video.get(cv2.CAP_PROP_FPS) or 30.0
+   sample_every = max(1, round(fps / 5.0))  # ~5 fps
+   frames = []
+   while True:
+       ok, frame = video.read()
+       if not ok:
+           break
+       frames.append(frame)
+   video.release()
+
+   client = LingBotMapClient(HttpRpcClient("http://127.0.0.1:8116"))
+   client.start_session(map_name="from_video")
+   for index, frame in enumerate(frames[::sample_every]):
+       rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # cv2 decodes BGR
+       client.push_frame(rgb, pose=None, timestamp_s=index / 5.0)
+   result = client.build()
+   print(result.frames, "frames ->", result.map_path)
+
+Hold the camera roughly forward-facing while walking and keep the clip under
+a few minutes: one map holds at most 1024 frames, and ``build`` runs the
+reconstruction over everything pushed. The built directory contains the
+archived ``frames/``, ``poses.json``, ``map.json`` (camera poses), and, with
+the GCT checkpoint active, ``depth.npy`` and ``world_points.npy`` — the
+point cloud of the workspace.
 
 For the perception server, run detection on any local photo:
 

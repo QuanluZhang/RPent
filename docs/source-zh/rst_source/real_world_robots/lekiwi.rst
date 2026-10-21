@@ -198,6 +198,35 @@ LeKiwi 可以在操作者遥控底盘的同时构建工作空间的地图。该�
 
 构建成功会打印地图目录和帧数；目录中是归档的帧和 ``map.json``。若要丢弃会话，改调 ``client.stop_session()``。
 
+更贴近真实的测试是录制一段工作空间的环绕视频来建图：读取视频，每秒抽取几帧（走动时画面变化缓慢，~5 fps 足够），推入建图会话：
+
+.. code-block:: python
+
+   import cv2
+   from rpent.robots.components.lingbotmap_client import LingBotMapClient
+   from rpent.utils.rpc.http_rpc import HttpRpcClient
+
+   video = cv2.VideoCapture("workspace_walkthrough.mp4")
+   fps = video.get(cv2.CAP_PROP_FPS) or 30.0
+   sample_every = max(1, round(fps / 5.0))  # ~5 fps
+   frames = []
+   while True:
+       ok, frame = video.read()
+       if not ok:
+           break
+       frames.append(frame)
+   video.release()
+
+   client = LingBotMapClient(HttpRpcClient("http://127.0.0.1:8116"))
+   client.start_session(map_name="from_video")
+   for index, frame in enumerate(frames[::sample_every]):
+       rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # cv2 解码为 BGR
+       client.push_frame(rgb, pose=None, timestamp_s=index / 5.0)
+   result = client.build()
+   print(result.frames, "frames ->", result.map_path)
+
+录制时相机大致朝前，整段视频控制在几分钟以内：一次建图最多容纳 1024 帧，``build`` 会对推入的全部帧做重建。构建出的目录包含归档的 ``frames/``、``poses.json``、``map.json``（相机位姿），以及启用 GCT 权重后的 ``depth.npy`` 和 ``world_points.npy``——即工作空间的点云。
+
 对感知服务端，在任意本地照片上运行检测：
 
 .. code-block:: python
