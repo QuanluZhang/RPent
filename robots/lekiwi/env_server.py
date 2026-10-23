@@ -25,7 +25,9 @@ surface is unchanged, so the client and the agent attach exactly as before.
 from __future__ import annotations
 
 import argparse
+import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -38,6 +40,14 @@ from rpent.utils.serialization import to_numpy_tree
 logger = get_logger("lekiwi_env_server")
 
 
+@dataclass(frozen=True)
+class _HeldVelocity:
+    """One operator hold: the clipped action and the instant it expires."""
+
+    action: np.ndarray
+    expires_at: float
+
+
 class LeKiwiEnvFacade(BaseEnvFacade):
     """Expose the LeKiwi ``env.*`` protocol from an in-process env backend."""
 
@@ -48,6 +58,7 @@ class LeKiwiEnvFacade(BaseEnvFacade):
         "get_observation",
         "get_camera_meta",
         "drive",
+        "hold",
         "stop",
     )
 
@@ -77,13 +88,10 @@ def _local_worker_info(cfg: Any) -> Any:
     drag in the whole Ray cluster, which the robot's computer cannot carry.
     """
     from omegaconf import OmegaConf
-
     from rlinf.robotics.discovery import RobotInfo
     from rlinf.scheduler import AcceleratorType, WorkerAddress, WorkerInfo
 
-    hardware = OmegaConf.to_container(
-        cfg.cluster.node_groups[0].hardware, resolve=True
-    )
+    hardware = OmegaConf.to_container(cfg.cluster.node_groups[0].hardware, resolve=True)
     from rlinf.robotics.robots.lekiwi import LeKiwiConfig
 
     robot_config = LeKiwiConfig(**{**hardware["configs"][0], "node_rank": None})
@@ -135,6 +143,23 @@ class LeKiwiEnvBackend:
         self.velocity_limits = np.asarray(
             self.env.env.single_action_space.high, dtype=np.float32
         )
+        self.step_period_s = 1.0 / self.step_frequency
+        # A held command drives the env from a control thread, paced by the
+        # env's own step, so motion does not depend on RPC latency. RPC
+        # threads only swap the command and read the last observation; the
+        # bus lock keeps them off the wheels while a step is in flight.
+        self._condition = threading.Condition()
+        self._bus_lock = threading.Lock()
+        self._command: _HeldVelocity | None = None
+        self._closed = False
+        self._steps = 0
+        self._latest_observation: Any = None
+        self._latest_observed_at = 0.0
+        self._control_error: str | None = None
+        self._control = threading.Thread(
+            target=self._control_loop, name="lekiwi-control", daemon=True
+        )
+        self._control.start()
 
     def get_env_meta(self) -> dict[str, Any]:
         return {
@@ -145,6 +170,19 @@ class LeKiwiEnvBackend:
         }
 
     def close_env(self) -> None:
+        """Stop the control thread, zero the wheels, then close the env."""
+        with self._condition:
+            self._closed = True
+            self._command = None
+            self._condition.notify_all()
+        self._control.join(timeout=5.0)
+        if self._control.is_alive():
+            logger.warning("the LeKiwi control thread did not stop within 5s")
+        with self._bus_lock:
+            try:
+                self._raw_rlinf_env().stop()
+            except Exception:  # noqa: BLE001 - shutdown must not mask the error
+                logger.warning("stopping the LeKiwi base failed", exc_info=True)
         try:
             self.env.close()
         except Exception:  # noqa: BLE001 - shutdown must not mask the error
@@ -163,31 +201,69 @@ class LeKiwiEnvBackend:
         """Return RPent's unwrapped RLinf environment compatibility layer."""
         return self.env.env.envs[0].unwrapped
 
+    def _clear_command(self) -> None:
+        with self._condition:
+            self._command = None
+            self._condition.notify_all()
+
     def reset(self) -> dict[str, Any]:
-        observation, info = self.env.reset()
+        self._clear_command()
+        with self._bus_lock:
+            observation, info = self.env.reset()
+            steps = self._steps
         return {
             "ok": True,
             "info": to_numpy_tree(info),
             "robot_state": self.get_robot_state(),
             "states": self._strip_batch(observation.get("states")),
             "main_images": self._strip_batch(observation.get("main_images")),
+            "steps": steps,
         }
 
     def get_robot_state(self) -> dict[str, Any]:
+        with self._bus_lock:
+            velocity = self._raw_rlinf_env().get_measured_velocity().tolist()
+        with self._condition:
+            steps = self._steps
+            control_error = self._control_error
         return {
-            "velocity": self._raw_rlinf_env().get_measured_velocity().tolist(),
+            "velocity": velocity,
             "action_dim": self.action_dim,
             "velocity_limits": self.velocity_limits.tolist(),
             "step_frequency": self.step_frequency,
+            "steps": steps,
+            "control_error": control_error,
         }
 
     def get_observation(self) -> dict[str, Any]:
-        # Live sensor read only; no motion is commanded.
+        """Return the last step observation, or read the sensors when idle.
+
+        While a hold is live the control thread captured an observation in
+        the step it just took, so serving that copy costs neither a bus read
+        nor a camera wait.
+        """
+        observation = self._latest_observation
+        fresh = time.monotonic() - self._latest_observed_at <= 2 * self.step_period_s
+        if self._command is not None and observation is not None and fresh:
+            return self._observation_payload(observation, self._steps)
         try:
-            return self._read_live_observation()
+            with self._bus_lock:
+                return self._read_live_observation()
         except Exception as exc:
             logger.warning("live observation refresh failed: %s", exc)
             return {}
+
+    def _observation_payload(self, observation: Any, steps: int) -> dict[str, Any]:
+        """Convert a batched step observation to the client's flat shape."""
+        payload: dict[str, Any] = {
+            "states": self._strip_batch(observation.get("states")),
+            "main_images": self._strip_batch(observation.get("main_images")),
+            "steps": steps,
+        }
+        extras = observation.get("extra_view_images")
+        if extras is not None:
+            payload["extra_view_images"] = self._strip_batch(extras)
+        return payload
 
     def _read_live_observation(self) -> dict[str, Any]:
         """Re-read the sensors live and map them to policy image keys.
@@ -208,6 +284,7 @@ class LeKiwiEnvBackend:
         ]
         if extras:
             output["extra_view_images"] = np.stack(extras, axis=0)
+        output["steps"] = self._steps
         return output
 
     def get_camera_meta(self) -> dict[str, Any]:
@@ -224,39 +301,28 @@ class LeKiwiEnvBackend:
     def drive(self, velocity: Any, *, duration_s: float) -> dict[str, Any]:
         """Hold one body velocity for a bounded duration, then stop.
 
-        The env's dead-man semantics stop the wheels after every control
-        period, so the base keeps moving only while this loop keeps
-        stepping -- and is stopped when it returns.
+        An explicit drive takes over from a Dashboard hold. The env's
+        dead-man semantics stop the wheels after every control period, so
+        the base keeps moving only while this loop keeps stepping.
         """
-        requested = np.asarray(velocity, dtype=np.float32)
-        if requested.shape != (self.action_dim,):
-            raise ValueError(
-                f"velocity must contain exactly {self.action_dim} values, "
-                f"got shape {requested.shape}"
-            )
-        if not np.isfinite(requested).all():
-            raise ValueError("velocity must contain only finite values")
+        requested = self._validate_velocity(velocity)
         if not np.isfinite(duration_s) or duration_s <= 0:
             raise ValueError("duration_s must be finite and positive")
         duration_s = min(float(duration_s), self.controller["drive_max_duration_s"])
 
-        action = np.clip(
-            requested,
-            self.velocity_limits * -1.0,
-            self.velocity_limits,
-        )
+        action = self._clip(requested)
+        self._clear_command()
         steps = max(1, int(round(duration_s * self.step_frequency)))
         states: Any = None
         observation: Any = None
-        deadline = (
-            time.time() + duration_s + self.controller["drive_max_duration_s"]
-        )
+        deadline = time.time() + duration_s + self.controller["drive_max_duration_s"]
         for _ in range(steps):
             if time.time() >= deadline:
                 break
-            observation, _reward, _term, _trunc, _info = self.env.step(
-                action[None, :]
-            )
+            with self._bus_lock:
+                observation, _reward, _term, _trunc, _info = self.env.step(
+                    action[None, :]
+                )
         if observation is not None:
             states = self._strip_batch(observation.get("states"))
         return {
@@ -269,12 +335,107 @@ class LeKiwiEnvBackend:
             "states": states,
         }
 
+    def hold(self, velocity: Any, *, ttl_s: float = 1.0) -> dict[str, Any]:
+        """Drive a body velocity until the command expires or ``stop`` arrives.
+
+        Returns without waiting for the motion: a control thread steps the
+        env at its own rate, so the base keeps moving while the caller
+        refreshes the command, however long each refresh takes on the wire.
+        """
+        requested = self._validate_velocity(velocity)
+        ttl = float(ttl_s)
+        if not np.isfinite(ttl) or ttl <= 0:
+            raise ValueError("ttl_s must be finite and positive")
+        ttl = min(ttl, self.controller["hold_max_ttl_s"])
+        action = self._clip(requested)
+        with self._condition:
+            if self._closed:
+                raise RuntimeError("the LeKiwi environment is closed")
+            self._command = (
+                _HeldVelocity(action=action, expires_at=time.monotonic() + ttl)
+                if action.any()
+                else None
+            )
+            self._condition.notify_all()
+            steps = self._steps
+        return {
+            "ok": True,
+            "requested_velocity": requested.tolist(),
+            "commanded_velocity": action.tolist(),
+            "ttl_s": ttl,
+            "steps": steps,
+        }
+
     def stop(self) -> dict[str, Any]:
-        self._raw_rlinf_env().stop()
+        """Drop any held command and zero the wheels now."""
+        with self._condition:
+            self._command = None
+            self._condition.notify_all()
+        with self._bus_lock:
+            try:
+                self._raw_rlinf_env().stop()
+            except Exception:  # noqa: BLE001 - report through robot_state
+                logger.warning("stopping the LeKiwi base failed", exc_info=True)
         return {
             "ok": True,
             "robot_state": self.get_robot_state(),
         }
+
+    def _control_loop(self) -> None:
+        """Step the env at its control rate while a held command is live."""
+        while True:
+            with self._condition:
+                self._condition.wait_for(
+                    lambda: self._closed or self._command is not None
+                )
+                if self._closed:
+                    return
+            while self._step_once():
+                pass
+
+    def _step_once(self) -> bool:
+        """Take one control step if the held command is still live."""
+        with self._bus_lock:
+            command = self._command
+            if (
+                self._closed
+                or command is None
+                or time.monotonic() >= command.expires_at
+            ):
+                return False
+            try:
+                observation, _reward, _term, _trunc, _info = self.env.step(
+                    command.action[None, :]
+                )
+            except Exception as exc:  # noqa: BLE001 - clear it and report
+                logger.warning("LeKiwi control step failed: %s", exc)
+                with self._condition:
+                    self._control_error = f"{type(exc).__name__}: {exc}"
+                    self._command = None
+                    self._condition.notify_all()
+                return False
+        with self._condition:
+            self._steps += 1
+            self._latest_observation = observation
+            self._latest_observed_at = time.monotonic()
+        return True
+
+    def _validate_velocity(self, velocity: Any) -> np.ndarray:
+        requested = np.asarray(velocity, dtype=np.float32)
+        if requested.shape != (self.action_dim,):
+            raise ValueError(
+                f"velocity must contain exactly {self.action_dim} values, "
+                f"got shape {requested.shape}"
+            )
+        if not np.isfinite(requested).all():
+            raise ValueError("velocity must contain only finite values")
+        return requested
+
+    def _clip(self, requested: np.ndarray) -> np.ndarray:
+        return np.asarray(
+            np.clip(requested, self.velocity_limits * -1.0, self.velocity_limits),
+            dtype=np.float32,
+        )
 
 
 def main(

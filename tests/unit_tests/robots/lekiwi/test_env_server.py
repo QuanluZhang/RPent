@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 import types
 from typing import Any
 
 import numpy as np
+import pytest
 
 from robots.lekiwi.env_client import LeKiwiEnvClient
 from robots.lekiwi.env_server import LeKiwiEnvFacade
@@ -51,6 +53,13 @@ class FakeBackend:
             "duration_s": duration_s,
         }
 
+    def hold(self, velocity, *, ttl_s):
+        return {
+            "ok": True,
+            "commanded_velocity": np.asarray(velocity),
+            "ttl_s": ttl_s,
+        }
+
     def stop(self):
         return {"ok": True}
 
@@ -64,6 +73,7 @@ def test_lekiwi_client_and_facade_round_trip_numpy_over_http():
     try:
         client = LeKiwiEnvClient(HttpRpcClient(f"http://{host}:{port}"))
         result = client.drive([0.1, 0.0, 5.0], duration_s=0.5)
+        held = client.hold([0.2, 0.0, 0.0], ttl_s=0.75)
         stopped = client.stop()
     finally:
         server.shutdown()
@@ -73,6 +83,8 @@ def test_lekiwi_client_and_facade_round_trip_numpy_over_http():
     assert result["ok"] is True
     np.testing.assert_allclose(result["requested_velocity"], [0.1, 0.0, 5.0])
     assert result["duration_s"] == 0.5
+    np.testing.assert_allclose(held["commanded_velocity"], [0.2, 0.0, 0.0])
+    assert held["ttl_s"] == 0.75
     assert stopped["ok"] is True
 
 
@@ -84,6 +96,7 @@ def test_lekiwi_facade_registers_readonly_observation_routes():
     assert "env.get_observation" in readonly
     assert "env.get_camera_meta" in readonly
     assert "env.drive" not in readonly
+    assert "env.hold" not in readonly
     assert "env.stop" not in readonly
 
 
@@ -150,34 +163,43 @@ def test_local_worker_info_owns_hardware_in_process(
     assert captured["robot_info"]["type"] == "LeKiwi"
 
 
-def test_backend_drive_commands_unbatched_velocity(
-    fake_rlinf_realworld_modules, monkeypatch
-):
-    # Regression: the backend clipped a commanded (3,) velocity against the
-    # vector env's batched (1, 3) action space, which broadcast the action to
-    # (1, 3) and the base rejected it ("Expected velocity shape (3,)").
-    # drive() must send each env a plain (3,) action.
+class _FakeInnerEnv:
+    """One env whose step paces like the real control period."""
+
+    def __init__(self) -> None:
+        import gymnasium as gym
+
+        self.action_space = gym.spaces.Box(
+            -np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32)
+        )
+        self.config = type("C", (), {"step_frequency": 50.0})
+        self.unwrapped = self
+        self.stepped: list[tuple[int, ...]] = []
+        self.stops = 0
+
+    def get_measured_velocity(self):
+        return np.zeros(3, dtype=np.float32)
+
+    def stop(self) -> None:
+        self.stops += 1
+
+    def step(self, action):
+        self.stepped.append(tuple(np.asarray(action).shape))
+        time.sleep(1.0 / self.config.step_frequency)
+        return (
+            {"states": np.zeros((1, 3), dtype=np.float32)},
+            0.0,
+            False,
+            False,
+            {},
+        )
+
+
+def _fake_backend(monkeypatch):
+    """Build a backend over an in-process fake env and return both."""
     import gymnasium as gym
-    import numpy as np
 
-    stepped: list[tuple[tuple[int, ...], ...]] = []
-
-    class FakeInnerEnv:
-        def __init__(self) -> None:
-            self.action_space = gym.spaces.Box(
-                -np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32)
-            )
-            self.config = type("C", (), {"step_frequency": 50.0})
-            self.unwrapped = self
-
-        def get_measured_velocity(self):
-            return np.zeros(3, dtype=np.float32)
-
-        def step(self, action):
-            stepped.append(tuple(np.asarray(action).shape))
-            return ({"states": np.zeros((1, 3), dtype=np.float32)}, 0.0, False, False, {})
-
-    inner = FakeInnerEnv()
+    inner = _FakeInnerEnv()
 
     class FakeVector:
         # Mirrors NoAutoResetSyncVectorEnv: a batched (1, 3) action space that
@@ -217,6 +239,9 @@ def test_backend_drive_commands_unbatched_velocity(
         def step(self, actions):
             return self._vector.step(actions)
 
+        def close(self) -> None:
+            return None
+
     real_env_module = types.ModuleType("rlinf.envs.real.env")
     real_env_module.RealWorldEnv = FakeRealWorldEnv
     monkeypatch.setitem(sys.modules, "rlinf.envs.real.env", real_env_module)
@@ -225,13 +250,83 @@ def test_backend_drive_commands_unbatched_velocity(
 
     monkeypatch.setattr(env_server, "_local_worker_info", lambda _cfg: None)
     cfg = type("Cfg", (), {"env": type("Env", (), {"eval": None})()})()
-
     backend = env_server.LeKiwiEnvBackend(
-        cfg=cfg, controller_config={"drive_max_duration_s": 2.0}
+        cfg=cfg,
+        controller_config={
+            "drive_max_duration_s": 2.0,
+            "hold_max_ttl_s": 1.0,
+        },
     )
-    result = backend.drive([0.5, 0.0, 0.0], duration_s=0.1)
+    return backend, inner
+
+
+def test_backend_drive_commands_unbatched_velocity(
+    fake_rlinf_realworld_modules, monkeypatch
+):
+    # Regression: the backend clipped a commanded (3,) velocity against the
+    # vector env's batched (1, 3) action space, which broadcast the action to
+    # (1, 3) and the base rejected it ("Expected velocity shape (3,)").
+    # drive() must send each env a plain (3,) action.
+    backend, inner = _fake_backend(monkeypatch)
+    try:
+        result = backend.drive([0.5, 0.0, 0.0], duration_s=0.1)
+    finally:
+        backend.close_env()
 
     assert result["ok"] is True
-    assert stepped, "drive() must step the env at least once"
-    assert all(shape == (3,) for shape in stepped), stepped
+    assert inner.stepped, "drive() must step the env at least once"
+    assert all(shape == (3,) for shape in inner.stepped), inner.stepped
     np.testing.assert_allclose(backend.velocity_limits, [1.0, 1.0, 1.0])
+
+
+def test_backend_hold_keeps_stepping_until_the_command_expires(
+    fake_rlinf_realworld_modules, monkeypatch
+):
+    # A hold is driven by the backend's control thread, not by the RPC, so
+    # the base moves continuously for as long as the command is refreshed.
+    backend, inner = _fake_backend(monkeypatch)
+    try:
+        result = backend.hold([0.5, 0.0, 0.0], ttl_s=0.15)
+        assert result["commanded_velocity"] == pytest.approx([0.5, 0.0, 0.0])
+
+        time.sleep(0.3)
+        driven = len(inner.stepped)
+        assert driven >= 3, inner.stepped
+        assert all(shape == (3,) for shape in inner.stepped)
+
+        time.sleep(0.15)
+        assert len(inner.stepped) == driven, "an expired hold must stop stepping"
+    finally:
+        backend.close_env()
+
+
+def test_backend_stop_ends_a_hold_before_its_ttl(
+    fake_rlinf_realworld_modules, monkeypatch
+):
+    backend, inner = _fake_backend(monkeypatch)
+    try:
+        backend.hold([0.5, 0.0, 0.0], ttl_s=1.0)
+        time.sleep(0.15)
+        backend.stop()
+        settled = len(inner.stepped)
+        time.sleep(0.15)
+        assert len(inner.stepped) == settled
+        assert inner.stops >= 1
+    finally:
+        backend.close_env()
+
+
+def test_backend_serves_the_step_observation_while_holding(
+    fake_rlinf_realworld_modules, monkeypatch
+):
+    # The control thread already read the sensors in the step it took; the
+    # frame poll must not touch the bus a second time.
+    backend, inner = _fake_backend(monkeypatch)
+    try:
+        backend.hold([0.5, 0.0, 0.0], ttl_s=1.0)
+        time.sleep(0.15)
+        observation = backend.get_observation()
+        assert observation["steps"] >= 1
+        np.testing.assert_allclose(observation["states"], np.zeros(3))
+    finally:
+        backend.close_env()

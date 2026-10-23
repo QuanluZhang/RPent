@@ -45,6 +45,7 @@ def test_lekiwi_client_uses_explicit_env_methods():
     client = LeKiwiEnvClient(rpc)
 
     client.drive([0.1, 0.0, 5.0])
+    client.hold([0.2, 0.0, 0.0], ttl_s=0.75)
     client.stop()
 
     calls_by_method = {
@@ -54,6 +55,7 @@ def test_lekiwi_client_uses_explicit_env_methods():
         "env.get_env_meta",
         "env.reset",
         "env.drive",
+        "env.hold",
         "env.stop",
     }
     drive = calls_by_method["env.drive"]
@@ -62,6 +64,11 @@ def test_lekiwi_client_uses_explicit_env_methods():
     )
     assert drive["velocity"].dtype == np.float32
     assert drive["duration_s"] == 1.0
+    hold = calls_by_method["env.hold"]
+    np.testing.assert_allclose(
+        hold["velocity"], np.array([0.2, 0.0, 0.0], dtype=np.float32)
+    )
+    assert hold["ttl_s"] == 0.75
 
 
 def test_lekiwi_client_drive_passes_requested_duration():

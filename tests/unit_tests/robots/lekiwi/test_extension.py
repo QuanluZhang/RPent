@@ -45,7 +45,10 @@ def test_lekiwi_uses_rpent_owned_robot_config(fake_rlinf_realworld_modules):
     assert hardware["wheel_radius"] == 0.05
     assert cfg.cluster.node_groups[0].hardware["type"] == "LeKiwi"
     assert cfg.cluster.component_placement.env.node_group == "lekiwi"
-    assert runtime.controller == {"drive_max_duration_s": 10.0}
+    assert runtime.controller == {
+        "drive_max_duration_s": 10.0,
+        "hold_max_ttl_s": 2.0,
+    }
 
 
 def test_lekiwi_runtime_config_rejects_unknown_drive_key(

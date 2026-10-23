@@ -57,6 +57,9 @@ def get_robot_config_path(default: str | Path = DEFAULT_CONFIG) -> Path:
 # no equivalent field, so these live here rather than in any RLinf dataclass.
 CONTROL = {
     "drive": {"max_duration_s": 10.0},
+    # Longest the server keeps a held velocity after the last refresh: the
+    # dead-man that stops the base when the operator's session goes away.
+    "hold": {"max_ttl_s": 2.0},
 }
 
 # ``env.eval.override_cfg`` values RPent sets away from RLinf's
@@ -74,6 +77,7 @@ def flatten_control(control: dict[str, Any]) -> dict[str, Any]:
     """Flatten nested ``CONTROL`` defaults into the flat env-server keys."""
     return {
         "drive_max_duration_s": float(control["drive"]["max_duration_s"]),
+        "hold_max_ttl_s": float(control["hold"]["max_ttl_s"]),
     }
 
 

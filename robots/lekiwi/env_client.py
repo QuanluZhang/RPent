@@ -33,6 +33,8 @@ class LeKiwiEnvClient(BaseEnvClient):
         "env.reset": 60.0,
         # A drive holds for up to the server's max duration, then reports.
         "env.drive": 60.0,
+        # A hold reports at once; the base keeps moving on the server.
+        "env.hold": 10.0,
     }
 
     def __init__(self, client: RpcClient, *, reset_on_connect: bool = True) -> None:
@@ -91,6 +93,19 @@ class LeKiwiEnvClient(BaseEnvClient):
         )
         self._remember_states(result.get("states"))
         return result
+
+    def hold(
+        self, velocity: np.ndarray | list[float], *, ttl_s: float = 1.0
+    ) -> dict[str, Any]:
+        """Drive ``velocity`` until the command expires or ``stop`` arrives."""
+        return self._client.call(
+            "env.hold",
+            kwargs={
+                "velocity": np.asarray(velocity, dtype=np.float32),
+                "ttl_s": float(ttl_s),
+            },
+            timeout_s=self._TIMEOUT_S["env.hold"],
+        )
 
     def stop(self) -> dict[str, Any]:
         return self._client.call(
