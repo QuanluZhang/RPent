@@ -2,134 +2,321 @@ LeKiwi
 ======
 
 LeKiwi is a three-wheeled omnidirectional mobile base: three Feetech STS3215
-wheel servos on a serial bus and one USB front camera. RPent drives it through
-the RLinf LeKiwi real-world environment: the agent commands one bounded body
-velocity ``[x, y, theta]`` (m/s, m/s, deg/s in the base frame) and reads the
-measured wheel velocity plus the synchronized front-camera frame after every
-command.
+wheel servos on one serial bus and a front USB camera. RPent drives it through
+RLinf's LeKiwi real-world environment. The planner asks for one bounded body
+velocity ``[x, y, theta]`` in m/s, m/s, and deg/s, and reads back the measured
+wheel velocity and a synchronized camera frame after every command.
 
-The base moves only while a ``drive`` call is executing — the environment stops
-the wheels at the end of every control step, so an interrupted or crashed run
-cannot leave the base rolling. There is no success signal of its own; the
-planner decides success from the task evidence.
+Two computers take part. The robot's onboard computer, usually a Raspberry Pi,
+owns the servo bus and the camera and runs the environment server. The agent
+machine, often a laptop on the same network, runs RPent and the planner. The
+LeKiwi environment is external: a Dashboard Session attaches to the address
+you give it and never spawns an environment of its own.
 
-The environment server runs on the robot's onboard computer (the Pi), and the
-RPent client attaches from another machine over HTTP. The LeKiwi dashboard spec
-marks the environment as external: dashboard runs require ``--env-endpoint``
-and never spawn their own environment process. Plain terminal runs may either
-attach with ``--env-endpoint`` or let RPent spawn a local environment server.
+This page goes from a working robot to a running task in four steps: prepare
+the robot computer, describe the site in one YAML file, start the environment
+server, and attach from the agent machine. The hardware checks that come
+before that — motor IDs, wheel test, camera check — are the
+`RLinf LeKiwi guide
+<https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/lekiwi.html>`_.
 
-Dependencies and installation
------------------------------
+What you need
+-------------
 
-Use Linux and Python 3.11 on the robot's computer. Install RPent with the
-``lekiwi`` extra, then RLinf from a LeKiwi-supporting revision — the released
-``rlinf`` extras do not yet include the LeKiwi environment layer. Until that
-lands in a release, use the ``dev/lekiwi`` branch:
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Component
+     - Requirement
+   * - Base
+     - LeKiwi mobile base with three Feetech STS3215 wheel servos, its servo
+       controller, and the kit's power supply.
+   * - Camera
+     - UVC webcam mounted on the front, connected to the robot computer.
+   * - Robot computer
+     - Linux computer with a USB port for the servo controller and enough
+       memory to run the environment server. No GPU is needed.
+   * - Agent machine
+     - Any computer that can reach the robot computer over the network. It
+       needs no hardware of its own.
+
+How the pieces fit
+------------------
+
+The environment server owns the hardware. It builds an RLinf
+``RealWorldEnv`` in its own process, opens the servo bus and the camera
+directly, and serves the ``env.*`` RPC methods. There is no Ray cluster on the
+robot computer: on a small board, a scheduler cluster would use more memory
+than the robot has.
+
+A ``drive`` call runs for the requested duration, stepping the wheels at the
+configured control rate, and stops them before it returns, so the base moves
+only while a call is executing. An interrupted run, a crashed client, or a
+dropped network cannot leave the base rolling. Dashboard teleoperation uses
+``hold`` instead: each button press sets a velocity that the server steps
+until it expires or a stop arrives. The Dashboard refreshes it while the
+button is held, so it lapses one second after the last refresh; the server
+caps any hold at two seconds.
+
+The base has no success signal of its own. The planner decides success from
+the task instruction and the evidence in the step records.
+
+Prepare the robot computer
+--------------------------
+
+Use Linux and Python 3.11. Install RPent with the ``lekiwi`` extra and RLinf
+from the same source tree, in one virtual environment:
 
 .. code-block:: bash
 
    git clone https://github.com/RLinf/RLinf.git /path/to/RLinf
-   git -C /path/to/RLinf checkout dev/lekiwi
    cd /path/to/RPent
    uv venv --python 3.11
    source .venv/bin/activate
    uv pip install --torch-backend cpu -e '.[lekiwi]' -e /path/to/RLinf
    uv pip check
 
+Released RLinf versions do not include the LeKiwi environment layer yet, so
+install the revision the RLinf LeKiwi guide links to until a release does.
+``--torch-backend cpu`` keeps the PyTorch wheels CPU-only, which is all the
+base needs.
+
 The extra installs headless OpenCV, matching ``lerobot[feetech]``: the robot
-computer has no display, and the GUI OpenCV build would additionally require a
-system ``libgl1`` package. Do not add GUI ``opencv-python`` to the same venv —
+computer has no display, and the GUI build would also need a system
+``libgl1`` package. Do not add GUI ``opencv-python`` to the same environment —
 the two distributions unpack into the same ``cv2`` package and corrupt it.
 
-The agent machine needs only RPent itself (``uv pip install -e '.[lekiwi]'``)
-plus network reachability to the robot's computer.
-
-Robot and task configuration
-----------------------------
-
-Run the detection script on the robot's computer to generate a ready-to-use
-site YAML:
+Bring the hardware up before going further. The install puts the RLinf
+``rlinf-lekiwi-*`` commands on your path, and the LeKiwi guide walks through
+them. In short:
 
 .. code-block:: bash
 
-   python -m robots.lekiwi.detect --output /path/to/robot.yaml
+   # Set the wheel IDs 7, 8, and 9, then spin each wheel and read it back.
+   rlinf-lekiwi-setup-motors --port /dev/ttyACM0
+   rlinf-lekiwi-test-wheels --port /dev/ttyACM0
 
-The script never commands motion: it pings the serial bus at every baud rate
-(lerobot's ``FeetechMotorsBus.scan_port``) and opens each camera once to
-confirm it produces a frame. It writes the detected wheel-bus port and camera
-devices plus conservative defaults for everything else, then prints the fields
-a human must still review: ``wheel_radius`` and ``base_radius`` (measure them
-with a ruler, in meters) and the ``drive`` limits (policy, not discovery —
-start from the defaults and raise them gradually). Pass ``--skip-motors`` or
-``--skip-cameras`` to probe only one side.
+   # Open the camera and print the frames it actually sends.
+   rlinf-lekiwi-check-camera
 
-Copy ``robots/lekiwi/config/example.yaml`` outside versioned source for the
-overall shape. Exactly one camera device must set ``main: true``; its name
-becomes ``main_image_key``. The ``drive`` section's keys are RLinf environment
-fields and are validated against the RLinf ``LeKiwiEnvConfig``: an unknown key
-fails at startup instead of being silently ignored.
+Keep the serial port and the camera identifier the camera command prints; the
+site YAML below needs both.
 
-The fields no command can discover are deliberate choices: geometry
-(``wheel_radius``, ``base_radius``) comes from a ruler, ``max_raw`` (default
-3000) is the servo's raw-speed cap, and the ``drive`` limits are the
-operator's velocity envelope — keep them conservative, since the tasks bound
-them further and the environment clips every command to them.
+Prepare the agent machine
+-------------------------
 
-Tasks are registered in ``robots/lekiwi/tasks.py``. Task 0
-(``drive_smoke_test``) exercises one conservative forward drive, one rotation,
-and inspection after each; task 1 (``room_survey``) drives bounded segments
-and reports what the camera sees. Pass the task with ``--task-id``.
+On the agent machine, install RPent the same way but without RLinf's source
+tree:
+
+.. code-block:: bash
+
+   cd /path/to/RPent
+   uv venv --python 3.11
+   source .venv/bin/activate
+   uv pip install -e '.[lekiwi]'
+   uv pip check
+
+The agent machine needs only network reachability to the robot computer, on
+the port you start the server with.
+
+Write the site YAML
+-------------------
+
+Run the detection script on the robot computer to write a site YAML with the
+detected port and camera identifiers:
+
+.. code-block:: bash
+
+   python -m robots.lekiwi.detect --output /path/to/lekiwi-site.yaml
+
+The script never commands motion. It pings the serial bus at every baud rate,
+opens each camera once to confirm it produces a frame, and prints what it
+found:
+
+.. code-block:: text
+
+   == LeKiwi site detection ==
+   serial ports scanned: ['/dev/ttyACM0']
+     /dev/ttyACM0: motor ids [7, 8, 9]
+   wheel bus: /dev/ttyACM0
+   camera usb-USB_Camera_USB_Camera_2505280051-video-index0: ok at 640x480
+   wrote /path/to/lekiwi-site.yaml
+   review before the first run:
+     - robot.wheel_radius / robot.base_radius: measure with a ruler (m)
+     - drive.max_linear_velocity / max_angular_velocity: policy; start low
+     - drive.frame_size: camera output size; raise from 128x128 if needed
+     - drive.step_frequency: control rate; 10 Hz suits the STS3215 bus
+
+Pass ``--skip-motors`` or ``--skip-cameras`` to probe only one side. The file
+it writes has the shape of ``robots/lekiwi/config/example.yaml``:
+
+.. code-block:: yaml
+
+   robot:
+     port: /dev/ttyACM0
+     wheel_radius: 0.05
+     base_radius: 0.125
+     max_raw: 3000
+
+   cameras:
+     devices:
+       front:
+         serial: "<front-camera-serial>"
+         type: webcam
+         main: true
+
+   drive:
+     step_frequency: 10.0
+     max_linear_velocity: 0.3
+     max_angular_velocity: 60.0
+     frame_size: [128, 128]
+
+Two kinds of values need a human. The geometry — ``wheel_radius`` and
+``base_radius`` in metres — comes from a ruler, and ``max_raw`` (default 3000)
+is the servo's raw-speed cap. The ``drive`` limits are your velocity envelope:
+they are a policy choice, not something a probe can discover, so start at the
+defaults and raise them gradually. The tasks below bound every command
+further, and the environment clips each one to these limits.
+
+Exactly one camera device must set ``main: true``; its name becomes
+``main_image_key`` in the RLinf config. The keys under ``drive`` are RLinf
+environment fields and are validated against ``LeKiwiEnvConfig`` at startup,
+so a typo fails immediately instead of being ignored.
+
+Keep the YAML outside versioned source. Both the server and the client read
+it with ``--robot-config``; the server needs it to open the hardware, and the
+client to know the velocity limits and camera layout.
+
+Tasks
+-----
+
+Tasks are registered in ``robots/lekiwi/tasks.py`` and chosen with
+``--task-id``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 25 65
+
+   * - ID
+     - Task
+     - What the planner does
+   * - 0
+     - ``drive_smoke_test``
+     - One conservative forward drive, one rotation, and an inspection of the
+       camera view after each, at or below 0.1 m/s and 30 deg/s for at most
+       2 s per drive.
+   * - 1
+     - ``room_survey``
+     - Drives bounded segments around the room and reports what the camera
+       sees, at or below 0.2 m/s and 45 deg/s for at most 3 s per drive.
+
+Start with task 0 on a cleared floor. It exercises the whole path — server,
+serial bus, camera, planner — without moving the base far.
 
 Start the environment server
 ----------------------------
 
-On the robot's computer, run the env server bound to the interface the agent
-machine can reach:
+On the robot computer, bind the server to the interface the agent machine can
+reach:
 
 .. code-block:: bash
 
-   python -m robots.lekiwi.env_server --robot-config /path/to/robot.yaml \
+   python -m robots.lekiwi.env_server \
+     --robot-config /path/to/lekiwi-site.yaml \
      --transport http --host 0.0.0.0 --port 8120
 
-The server owns the RLinf ``RealWorldEnv`` in its own process. It connects the wheel bus and the
-camera directly and serves the ``env.*`` RPC methods. Use ``--print-config``
-to print the resolved RLinf configuration and exit without touching hardware.
-Stop the server with SIGINT; it stops the wheels on shutdown.
+It prints the address to attach to:
+
+.. code-block:: text
+
+   RPC server listening on http://0.0.0.0:8120
+
+Check the resolved configuration before touching hardware with
+``--print-config``, which prints the RLinf config as YAML and exits. Stop the
+server with Ctrl+C; it stops the wheels and drops torque on shutdown.
 
 Attach from the agent machine
 -----------------------------
 
-From the agent machine (for example a laptop on the same network), attach to
-the running server and let the planner drive:
+Run a task against the server you just started:
 
 .. code-block:: bash
 
    rpent --robot lekiwi --task-id 0 \
      --env-endpoint http://ROBOT_HOST:8120 \
-     --robot-config /path/to/robot.yaml \
+     --robot-config /path/to/lekiwi-site.yaml \
      --planner api --model MODEL_ID
 
-For dashboard control, add ``--dashboard`` and keep ``--env-endpoint``: the
-LeKiwi environment is external, so the dashboard requires the endpoint and
-never spawns its own server.
+``--env-endpoint`` is what makes this a remote run. Omit it and RPent spawns
+an environment server on the agent machine instead, which only works when the
+servo bus is attached there.
+
+For hands-on control, start a Dashboard Session with no planner and drive
+from the browser:
+
+.. code-block:: bash
+
+   rpent --robot lekiwi --dashboard --planner manual \
+     --env-endpoint http://ROBOT_HOST:8120 \
+     --robot-config /path/to/lekiwi-site.yaml
+
+The Dashboard requires ``--env-endpoint`` for LeKiwi because the environment
+is external. Hold a direction button to drive, release it to stop, and use
+``End run`` to finish. See :doc:`../guides/dashboard` for the full Dashboard
+walkthrough, including recording video and action logs.
 
 Tools and artifacts
 -------------------
 
-The planner sees three tools: ``drive(velocity, duration_s)``,
-``stop()``, and the read-only ``view_env_state(step)``. ``duration_s`` is
-bounded (at most 10 s per call); requested velocities are clipped to the
-configured limits. Every step records ``front.png`` (the synchronized
-front-camera frame) and ``camera_meta.json`` next to the run's step records;
-``view_env_state`` returns the record blob plus the front image.
+The planner has three tools: ``drive(velocity, duration_s)``, ``stop()``, and
+the read-only ``view_env_state(step)``. ``duration_s`` is capped at 10 s per
+call, and requested velocities are clipped to the site limits.
+
+Every run writes to ``logs/<timestamp>_lekiwi_t<task_id>/`` unless you pass
+``--output-dir``. Each step records the synchronized front-camera frame as
+``front.png`` and its metadata as ``camera_meta.json``; ``view_env_state``
+returns that record together with the image. A Dashboard Session also keeps
+``teleop_NNN.mp4`` and ``teleop_actions.jsonl`` for the stretches driven by
+hand.
+
+Troubleshooting
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Symptom
+     - Cause and fix
+   * - ``ModuleNotFoundError`` for ``rlinf.envs.real.lekiwi``
+     - The installed RLinf has no LeKiwi environment layer. Install a
+       revision that has it, as in the robot install above.
+   * - Client cannot connect
+     - The server is not running, bound to ``127.0.0.1``, or the port is
+       closed. Bind ``0.0.0.0`` and open the port between the two machines.
+   * - ``robot.port is required``
+     - The site YAML has no ``robot.port``. Fill it from the detection output
+       or by hand.
+   * - ``exactly one camera device must set main: true``
+     - Mark one camera device ``main: true`` and unset the others.
+   * - ``unknown LeKiwi task``
+     - ``--task-id`` is not 0 or 1.
+   * - Camera opens but never sends a frame
+     - Another program holds the camera, or the cable carries no data. Close
+       other camera programs and re-run ``rlinf-lekiwi-check-camera``.
+   * - ``Permission denied`` on the serial port
+     - Your user cannot open serial devices. On Linux, add yourself to the
+       ``dialout`` group and log in again.
+   * - The base keeps moving after a Dashboard command
+     - The server was not stopped. Press Stop in the Dashboard or Ctrl+C in
+       the server terminal; a hold expires a second after its last refresh.
 
 Safety
 ------
 
-The base has no bumpers or onboard planner: clearance is the operator's
-responsibility. Clear the floor around the base before every run, keep the
-velocity limits in the site YAML conservative, and keep an operator within
-reach of the base's power switch. If the camera view or the reported velocity
-looks wrong, stop the run — an ``env.stop`` is one RPC call away from the
-dashboard or terminal.
+The base has no bumpers and no onboard planner: clearance is your
+responsibility. Clear the floor before every run, keep the ``drive`` limits
+conservative, and keep an operator within reach of the power switch. If the
+camera view or the reported velocity looks wrong, stop the run — a
+``stop()`` call or the Dashboard Stop button reaches the base in one RPC.
