@@ -114,9 +114,9 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 
 有两类值必须由人来定。几何参数 ``wheel_radius`` 和 ``base_radius``（单位为米）要用尺子量；``max_raw``（默认 3000）是舵机的原始速度上限。``drive`` 的速度上限则是你的速度包络：这是策略选择，探测不出来——从默认值起步，逐步放宽。下面的任务会进一步收紧每条命令，环境也会把每条命令裁剪到这些上限内。
 
-有且仅有一个摄像头设备可以设置 ``main: true``，它的名字会成为 RLinf 配置里的 ``main_image_key``。``drive`` 下的键就是 RLinf 环境字段，启动时会按 ``LeKiwiEnvConfig`` 校验，因此拼错会立即报错，而不是被静默忽略。
+生成结果与实际机器人不符时，直接修改这个文件：例如重命名前置摄像头的条目，或提高 ``frame_size`` 以使用摄像头原生支持的分辨率。
 
-把这个 YAML 放在版本库之外。服务端和控制端都用 ``--robot-config`` 读取它：服务端据此打开硬件，控制端据此获得速度上限和摄像头布局。
+把这个 YAML 复制到控制端。两台机器都用 ``--robot-config`` 读取它：机器人板载计算机据此打开硬件，控制端据此获得速度上限和摄像头布局。
 
 任务
 ----
@@ -146,7 +146,7 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 
 .. code-block:: bash
 
-   python -m robots.lekiwi.env_server \
+   rpent-lekiwi-server \
      --robot-config /path/to/lekiwi-site.yaml \
      --transport http --host 0.0.0.0 --port 8120
 

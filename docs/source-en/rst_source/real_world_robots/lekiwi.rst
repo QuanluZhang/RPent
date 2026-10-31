@@ -155,14 +155,13 @@ they are a policy choice, not something a probe can discover, so start at the
 defaults and raise them gradually. The tasks below bound every command
 further, and the environment clips each one to these limits.
 
-Exactly one camera device must set ``main: true``; its name becomes
-``main_image_key`` in the RLinf config. The keys under ``drive`` are RLinf
-environment fields and are validated against ``LeKiwiEnvConfig`` at startup,
-so a typo fails immediately instead of being ignored.
+Edit the generated file where it does not fit the robot, for example to
+rename the front camera entry or to raise ``frame_size`` for a resolution the
+camera supports natively.
 
-Keep the YAML outside versioned source. Both the server and the client read
-it with ``--robot-config``; the server needs it to open the hardware, and the
-client to know the velocity limits and camera layout.
+Copy the YAML to the agent machine. Both computers read it with
+``--robot-config``: the robot computer needs it to open the hardware, and the
+agent machine to know the velocity limits and camera layout.
 
 Tasks
 -----
@@ -198,7 +197,7 @@ reach:
 
 .. code-block:: bash
 
-   python -m robots.lekiwi.env_server \
+   rpent-lekiwi-server \
      --robot-config /path/to/lekiwi-site.yaml \
      --transport http --host 0.0.0.0 --port 8120
 

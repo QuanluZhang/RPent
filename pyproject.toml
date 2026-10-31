@@ -57,6 +57,7 @@ rpent-memory = "rpent.cli.memory:main"
 rpent-check-llm = "rpent.cli.check_llm:main"
 rpent-flywheel = "rpent.flywheel.cli:main"
 rpent-lekiwi-detect = "robots.lekiwi.detect:main"
+rpent-lekiwi-server = "robots.lekiwi.env_server:main"
 
 [project.urls]
 Homepage = "https://github.com/RLinf/RPent"
