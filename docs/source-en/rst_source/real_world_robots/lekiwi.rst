@@ -65,49 +65,25 @@ the task instruction and the evidence in the step records.
 Prepare the robot computer
 --------------------------
 
-Use Linux and Python 3.11. Install RPent with the ``lekiwi`` extra and RLinf
-from the same source tree, in one virtual environment:
+Use Linux and Python 3.11. Install RPent with the ``lekiwi`` extra, which
+pulls in RLinf:
 
 .. code-block:: bash
 
-   git clone https://github.com/RLinf/RLinf.git /path/to/RLinf
    cd /path/to/RPent
    uv venv --python 3.11
    source .venv/bin/activate
-   uv pip install --torch-backend cpu -e '.[lekiwi]' -e /path/to/RLinf
+   uv pip install --torch-backend cpu -e '.[lekiwi]'
    uv pip check
 
 Released RLinf versions do not include the LeKiwi environment layer yet, so
-install the revision the RLinf LeKiwi guide links to until a release does.
-``--torch-backend cpu`` keeps the PyTorch wheels CPU-only, which is all the
-base needs.
-
-The extra installs headless OpenCV, matching ``lerobot[feetech]``: the robot
-computer has no display, and the GUI build would also need a system
-``libgl1`` package. Do not add GUI ``opencv-python`` to the same environment —
-the two distributions unpack into the same ``cv2`` package and corrupt it.
-
-Bring the hardware up before going further. The install puts the RLinf
-``rlinf-lekiwi-*`` commands on your path, and the LeKiwi guide walks through
-them. In short:
-
-.. code-block:: bash
-
-   # Set the wheel IDs 7, 8, and 9, then spin each wheel and read it back.
-   rlinf-lekiwi-setup-motors --port /dev/ttyACM0
-   rlinf-lekiwi-test-wheels --port /dev/ttyACM0
-
-   # Open the camera and print the frames it actually sends.
-   rlinf-lekiwi-check-camera
-
-Keep the serial port and the camera identifier the camera command prints; the
-site YAML below needs both.
+the extra pins the revision that does. ``--torch-backend cpu`` keeps the
+PyTorch wheels CPU-only, which is all the base needs.
 
 Prepare the agent machine
 -------------------------
 
-On the agent machine, install RPent the same way but without RLinf's source
-tree:
+On the agent machine, install RPent the same way:
 
 .. code-block:: bash
 
@@ -128,7 +104,7 @@ detected port and camera identifiers:
 
 .. code-block:: bash
 
-   python -m robots.lekiwi.detect --output /path/to/lekiwi-site.yaml
+   rpent-lekiwi-detect --output /path/to/lekiwi-site.yaml
 
 The script never commands motion. It pings the serial bus at every baud rate,
 opens each camera once to confirm it produces a frame, and prints what it

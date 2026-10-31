@@ -37,38 +37,22 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 准备机器人板载计算机
 --------------------
 
-使用 Linux 和 Python 3.11，把带 ``lekiwi`` extra 的 RPent 与同一份 RLinf 源码安装进同一个虚拟环境：
+使用 Linux 和 Python 3.11，安装带 ``lekiwi`` extra 的 RPent，该 extra 会一并安装 RLinf：
 
 .. code-block:: bash
 
-   git clone https://github.com/RLinf/RLinf.git /path/to/RLinf
    cd /path/to/RPent
    uv venv --python 3.11
    source .venv/bin/activate
-   uv pip install --torch-backend cpu -e '.[lekiwi]' -e /path/to/RLinf
+   uv pip install --torch-backend cpu -e '.[lekiwi]'
    uv pip check
 
-已发布的 RLinf 版本尚未包含 LeKiwi 环境层，在合入发布前请安装 RLinf LeKiwi 指南所链接的那个修订版本。``--torch-backend cpu`` 让 PyTorch 只装 CPU 版本，底盘只需要这些。
-
-该 extra 安装的是 headless 版 OpenCV，与 ``lerobot[feetech]`` 保持一致：板载计算机没有显示器，而 GUI 版还需要系统安装 ``libgl1``。不要在同一个环境中再加装 GUI 版 ``opencv-python``——两个发行版会解包到同一个 ``cv2`` 包里并互相覆盖。
-
-继续之前先把硬件调通。安装会把 RLinf 的 ``rlinf-lekiwi-*`` 命令放进 PATH，具体流程见 LeKiwi 指南，简要如下：
-
-.. code-block:: bash
-
-   # 写入轮电机编号 7、8、9，然后逐个转动车轮并读回速度。
-   rlinf-lekiwi-setup-motors --port /dev/ttyACM0
-   rlinf-lekiwi-test-wheels --port /dev/ttyACM0
-
-   # 打开摄像头，打印它实际送出的画面信息。
-   rlinf-lekiwi-check-camera
-
-记下串口和摄像头命令打印的摄像头标识符，下面的站点 YAML 两个都要用到。
+已发布的 RLinf 版本尚未包含 LeKiwi 环境层，因此该 extra 固定到包含它的那个修订版本。``--torch-backend cpu`` 让 PyTorch 只装 CPU 版本，底盘只需要这些。
 
 准备控制端
 ----------
 
-在控制端同样安装 RPent，但不需要 RLinf 源码：
+在控制端以同样的方式安装 RPent：
 
 .. code-block:: bash
 
@@ -87,7 +71,7 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
 
 .. code-block:: bash
 
-   python -m robots.lekiwi.detect --output /path/to/lekiwi-site.yaml
+   rpent-lekiwi-detect --output /path/to/lekiwi-site.yaml
 
 脚本不会让底盘运动：它按各个波特率对串行总线执行 ping，打开每个摄像头确认能取到一帧，并打印探测结果：
 

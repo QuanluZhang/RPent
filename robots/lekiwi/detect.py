@@ -16,7 +16,7 @@
 
 Run on the robot's computer, with the ``lekiwi`` extra installed:
 
-    python -m robots.lekiwi.detect --output /path/to/robot.yaml
+    rpent-lekiwi-detect --output /path/to/robot.yaml
 
 Nothing moves: the wheel bus is only pinged (lerobot's
 ``FeetechMotorsBus.scan_port`` broadcasts a ping at every baud rate) and each

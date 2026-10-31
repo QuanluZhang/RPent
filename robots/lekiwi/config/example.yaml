@@ -1,4 +1,4 @@
-# Example LeKiwi site configuration. `python -m robots.lekiwi.detect` writes a
+# Example LeKiwi site configuration. `rpent-lekiwi-detect` writes a
 # filled-in copy of this file; edit the result and pass it with --robot-config.
 
 robot:
