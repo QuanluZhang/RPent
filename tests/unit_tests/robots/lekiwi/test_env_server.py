@@ -138,6 +138,15 @@ class _FakeInnerEnv:
     def stop(self) -> None:
         self.stops += 1
 
+    def reset(self):
+        return (
+            {
+                "states": np.zeros((1, 3), dtype=np.float32),
+                "main_images": np.zeros((1, 4, 4, 3), dtype=np.uint8),
+            },
+            {},
+        )
+
     def step(self, action):
         self.stepped.append(tuple(np.asarray(action).shape))
         time.sleep(1.0 / self.config.step_frequency)
@@ -179,6 +188,9 @@ def _fake_backend(monkeypatch):
         def step(self, actions):
             return (inner.step(actions[0])[0], 0.0, False, False, {})
 
+        def reset(self):
+            return inner.reset()
+
     class FakeRealWorldEnv:
         def __init__(self, _cfg: Any, **_rest: Any) -> None:
             self._vector = FakeVector()
@@ -190,6 +202,9 @@ def _fake_backend(monkeypatch):
         @property
         def action_space(self):
             return self._vector.action_space
+
+        def reset(self):
+            return self._vector.reset()
 
         def step(self, actions):
             return self._vector.step(actions)
@@ -230,8 +245,28 @@ def test_backend_drive_commands_unbatched_velocity(
 
     assert result["ok"] is True
     assert inner.stepped, "drive() must step the env at least once"
+    assert result["steps"] == len(inner.stepped)
+    assert result["robot_state"]["steps"] == len(inner.stepped)
     assert all(shape == (3,) for shape in inner.stepped), inner.stepped
     np.testing.assert_allclose(backend.velocity_limits, [1.0, 1.0, 1.0])
+
+
+def test_backend_reset_clears_steps_and_control_error(
+    fake_rlinf_realworld_modules, monkeypatch
+):
+    backend, _ = _fake_backend(monkeypatch)
+    try:
+        driven = backend.drive([0.5, 0.0, 0.0], duration_s=0.05)
+        assert driven["robot_state"]["steps"] >= 1
+        with backend._condition:
+            backend._control_error = "RuntimeError: transient bus fault"
+
+        reset_result = backend.reset()
+        assert reset_result["steps"] == 0
+        assert reset_result["robot_state"]["steps"] == 0
+        assert reset_result["robot_state"]["control_error"] is None
+    finally:
+        backend.close_env()
 
 
 def test_backend_hold_keeps_stepping_until_the_command_expires(

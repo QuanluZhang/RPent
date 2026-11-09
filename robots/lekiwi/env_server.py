@@ -209,6 +209,11 @@ class LeKiwiEnvBackend:
         self._clear_command()
         with self._bus_lock:
             observation, info = self.env.reset()
+        with self._condition:
+            self._steps = 0
+            self._control_error = None
+            self._latest_observation = observation
+            self._latest_observed_at = time.monotonic()
             steps = self._steps
         return {
             "ok": True,
@@ -241,10 +246,14 @@ class LeKiwiEnvBackend:
         the step it just took, so serving that copy costs neither a bus read
         nor a camera wait.
         """
-        observation = self._latest_observation
-        fresh = time.monotonic() - self._latest_observed_at <= 2 * self.step_period_s
-        if self._command is not None and observation is not None and fresh:
-            return self._observation_payload(observation, self._steps)
+        with self._condition:
+            command = self._command
+            observation = self._latest_observation
+            observed_at = self._latest_observed_at
+            steps = self._steps
+        fresh = time.monotonic() - observed_at <= 2 * self.step_period_s
+        if command is not None and observation is not None and fresh:
+            return self._observation_payload(observation, steps)
         try:
             with self._bus_lock:
                 return self._read_live_observation()
@@ -283,7 +292,8 @@ class LeKiwiEnvBackend:
         ]
         if extras:
             output["extra_view_images"] = np.stack(extras, axis=0)
-        output["steps"] = self._steps
+        with self._condition:
+            output["steps"] = self._steps
         return output
 
     def get_camera_meta(self) -> dict[str, Any]:
@@ -311,24 +321,32 @@ class LeKiwiEnvBackend:
 
         action = self._clip(requested)
         self._clear_command()
-        steps = max(1, int(round(duration_s * self.step_frequency)))
+        target_steps = max(1, int(round(duration_s * self.step_frequency)))
+        executed_steps = 0
         states: Any = None
         observation: Any = None
-        deadline = time.time() + duration_s + self.controller["drive_max_duration_s"]
-        for _ in range(steps):
-            if time.time() >= deadline:
+        deadline = (
+            time.monotonic() + duration_s + self.controller["drive_max_duration_s"]
+        )
+        for _ in range(target_steps):
+            if time.monotonic() >= deadline:
                 break
             with self._bus_lock:
                 observation, _reward, _term, _trunc, _info = self.env.step(
                     action[None, :]
                 )
+            executed_steps += 1
+            with self._condition:
+                self._steps += 1
+                self._latest_observation = observation
+                self._latest_observed_at = time.monotonic()
         if observation is not None:
             states = self._strip_batch(observation.get("states"))
         return {
             "ok": True,
             "requested_velocity": requested.tolist(),
             "commanded_velocity": np.asarray(action, dtype=np.float32).tolist(),
-            "steps": steps,
+            "steps": executed_steps,
             "duration_s": duration_s,
             "robot_state": self.get_robot_state(),
             "states": states,
@@ -395,12 +413,10 @@ class LeKiwiEnvBackend:
     def _step_once(self) -> bool:
         """Take one control step if the held command is still live."""
         with self._bus_lock:
-            command = self._command
-            if (
-                self._closed
-                or command is None
-                or time.monotonic() >= command.expires_at
-            ):
+            with self._condition:
+                command = self._command
+                closed = self._closed
+            if closed or command is None or time.monotonic() >= command.expires_at:
                 return False
             try:
                 observation, _reward, _term, _trunc, _info = self.env.step(

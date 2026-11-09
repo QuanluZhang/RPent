@@ -119,7 +119,7 @@ class TeleopController:
         self._output_dir = Path(output_dir)
         self._env_state = env_state
         self._frame_interval_s = max(0.02, float(frame_interval_s))
-        self._refresh_s = max(0.05, float(refresh_s))
+        self._refresh_s = max(0.02, float(refresh_s))
         self._hold_ttl_s = max(0.2, float(hold_ttl_s))
         self._condition = threading.Condition()
         self._velocity = (0.0, 0.0, 0.0)
@@ -288,6 +288,8 @@ class TeleopController:
                     self._command_version += 1
                     self._stop_pending = True
                     self._condition.notify_all()
+            else:
+                self._wait_for_change(self._refresh_s, version)
 
     def _next_command(
         self,

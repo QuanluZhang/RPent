@@ -150,6 +150,9 @@ def test_a_held_command_is_refreshed_without_stopping_the_base(rig):
     controller.hold([0.15, 0.0, 0.0], ttl_s=2.0)
     assert env.drove.wait(timeout=3)
     _wait_until(lambda: len(env.calls) >= 3)
+    time.sleep(REFRESH_S * 3)
+    # Refreshing at REFRESH_S must pace RPC calls rather than busy-spinning.
+    assert len(env.calls) < 30
 
     assert env.stop_calls == 0, "a continuously held command must not stop"
     controller.stop()

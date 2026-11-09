@@ -36,9 +36,9 @@ class LeKiwiEnvClient(BaseEnvClient):
         **BaseEnvClient._TIMEOUT_S,
         "default": 30.0,
         "env.reset": 60.0,
-        # A drive holds the wheels for up to the server's 10 s cap.
+        # RPC timeout (s); exceeds the server's 10 s drive cap plus step overhead.
         "env.drive": 60.0,
-        # A hold reports at once; the base keeps moving on the server.
+        # RPC timeout (s); hold returns immediately while the server drives.
         "env.hold": 10.0,
     }
 

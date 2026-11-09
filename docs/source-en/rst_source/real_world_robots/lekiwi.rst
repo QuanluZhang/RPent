@@ -246,7 +246,8 @@ from the browser:
      --robot-config /path/to/lekiwi.yaml
 
 The Dashboard requires ``--env-endpoint`` for LeKiwi because the environment
-is external. Manual mode drives the base from the Teleoperation panel: hold a
+is external. Submit ``/rpent-task 0`` in the Dashboard composer to start a
+manual TaskRun, then drive the base from the Teleoperation panel: hold a
 direction button to move and release it to stop, and the velocity lapses one
 second after the last refresh, so a closed browser leaves the robot at rest.
 ``Record video`` and ``Record actions`` write each driving stretch as
