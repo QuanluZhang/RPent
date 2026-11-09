@@ -184,7 +184,7 @@ LeKiwi 是一个三轮全向移动底盘：三个 Feetech STS3215 轮电机挂�
      --env-endpoint http://ROBOT_HOST:8120 \
      --robot-config /path/to/lekiwi.yaml
 
-LeKiwi 的环境是外部环境，所以 Dashboard 必须提供 ``--env-endpoint``。手动模式由“手动遥控”面板驱动底盘：按住方向按钮行驶，松开即停车；速度命令在最后一次刷新一秒后过期，所以关闭网页后机器人保持静止。开启 ``录制视频`` 与 ``记录动作`` 会把每段驾驶保存为 ``teleop_NNN.mp4`` 和 ``teleop_actions.jsonl``；``End run`` 结束本次 TaskRun。Dashboard 的其他用法见 :doc:`../guides/dashboard`。
+LeKiwi 的环境是外部环境，所以 Dashboard 必须提供 ``--env-endpoint``。在 Dashboard 输入框提交 ``/rpent-task 0`` 启动手动 TaskRun，然后用“手动遥控”面板驱动底盘：按住方向按钮行驶，松开即停车；速度命令在最后一次刷新一秒后过期，所以关闭网页后机器人保持静止。开启 ``录制视频`` 与 ``记录动作`` 会把每段驾驶保存为 ``teleop_NNN.mp4`` 和 ``teleop_actions.jsonl``；``End run`` 结束本次 TaskRun。Dashboard 的其他用法见 :doc:`../guides/dashboard`。
 
 工具与产物
 ----------

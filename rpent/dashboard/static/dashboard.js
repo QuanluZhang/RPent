@@ -273,6 +273,7 @@ const copy = COPY[LANGUAGE];
 const RUNTIME_STATES = ["pending", "starting", "ready", "failed"];
 let runtimeComponents = [];
 let taskCommandUsage = "";
+let sessionPlanner = null;
 
 function applyStaticCopy() {
   for (const element of document.querySelectorAll("[data-i18n]")) {
@@ -334,6 +335,7 @@ function updateFrameAvailability(available) {
 }
 
 function renderPlannerConfig(config) {
+  sessionPlanner = config.planner || null;
   const planner = config.planner || copy.notSet;
   const model = config.model || copy.defaultModel;
   const element = $("#plannerMeta");
@@ -750,14 +752,25 @@ $("#teleopEnd").addEventListener("click", async () => {
   }
 });
 
+function setTeleopControlsDisabled(disabled) {
+  for (const control of $("#teleopPanel").querySelectorAll("input, button")) {
+    control.disabled = disabled;
+  }
+}
+
 function syncTeleop(teleop) {
   const active = Boolean(teleop?.active);
+  const showTeleop = active || sessionPlanner === "manual";
   const wasActive = teleopState.active;
   teleopState.active = active;
-  $("#teleopPanel").hidden = !active;
-  $("#primitivePanel").hidden = active;
+  $("#teleopPanel").hidden = !showTeleop;
+  $("#primitivePanel").hidden = showTeleop;
+  setTeleopControlsDisabled(!active);
   if (!active) {
     if (wasActive || teleopState.direction) stopTeleopHold();
+    if (showTeleop && Date.now() >= teleopState.statusHoldUntil) {
+      setTeleopStatus(copy.teleopWaiting);
+    }
     return;
   }
   if (!wasActive) {
@@ -774,11 +787,14 @@ function syncTeleop(teleop) {
 }
 
 function resetTeleopPanel() {
+  const showTeleop = sessionPlanner === "manual";
   teleopState.active = false;
   stopTeleopHold();
   teleopState.statusHoldUntil = 0;
-  $("#teleopPanel").hidden = true;
-  $("#primitivePanel").hidden = false;
+  $("#teleopPanel").hidden = !showTeleop;
+  if (showTeleop) $("#teleopPanel").open = true;
+  $("#primitivePanel").hidden = showTeleop;
+  setTeleopControlsDisabled(true);
   setTeleopStatus(copy.teleopWaiting);
 }
 

@@ -236,7 +236,11 @@ def _run_dashboard_task(
                 **shared_runtime_kwargs,
             }
             prompt_vars = {**run_config.prompt_vars, "output_dir": output_dir}
-            session_message = robot_spec.prompts.render("user", variables=prompt_vars)
+            session_message = (
+                robot_spec.prompts.render("user", variables=prompt_vars)
+                if task_args.planner != "manual"
+                else ""
+            )
             sessions = max(
                 1,
                 int(getattr(task_args, "explore_sessions", 1) or 1),
@@ -251,26 +255,27 @@ def _run_dashboard_task(
                     or state.task_finalization_cancelled
                 ):
                     break
-                if session_number > 1:
-                    logger.info(
-                        "=== handing off to agent %d/%d ===",
-                        session_number,
-                        sessions,
+                if task_args.planner != "manual":
+                    if session_number > 1:
+                        logger.info(
+                            "=== handing off to agent %d/%d ===",
+                            session_number,
+                            sessions,
+                        )
+                        session_message = _handoff_message(
+                            output_dir,
+                            session_number,
+                            sessions,
+                            robot_name=args.robot_name,
+                        )
+                    system_prompt = robot_spec.prompts.render(
+                        "system",
+                        variables={
+                            **prompt_vars,
+                            "session_number": session_number,
+                            "session_max": sessions,
+                        },
                     )
-                    session_message = _handoff_message(
-                        output_dir,
-                        session_number,
-                        sessions,
-                        robot_name=args.robot_name,
-                    )
-                system_prompt = robot_spec.prompts.render(
-                    "system",
-                    variables={
-                        **prompt_vars,
-                        "session_number": session_number,
-                        "session_max": sessions,
-                    },
-                )
                 state_output_dir = output_dir
                 if getattr(task_args, "explore", False):
                     state_output_dir = (

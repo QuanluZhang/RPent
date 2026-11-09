@@ -22,7 +22,7 @@ Nothing moves: the wheel bus is only pinged (lerobot's
 ``FeetechMotorsBus.scan_port`` broadcasts a ping at every baud rate) and each
 camera is opened through the RLinf ``WebcamCamera`` driver to confirm it
 produces a frame. Camera discovery and probing follow the same contract as
-RLinf's own webcam smoke test (``toolkits/lekiwi/test_webcam.py``):
+RLinf's own webcam smoke test (``rlinf/robotics/tools/lekiwi/camera.py``):
 ``WebcamCamera.discover()`` names the devices and a short-lived
 ``WebcamCamera`` connection decides which one delivers frames. Geometry and
 drive limits are policy, not discovery, so they are written as conservative
@@ -107,7 +107,7 @@ def discover_cameras() -> list[str]:
 def probe_camera(serial: str) -> dict[str, Any]:
     """Open one camera through the RLinf driver and confirm it delivers a frame.
 
-    Follows the smoke-test contract in ``toolkits/lekiwi/test_webcam.py``:
+    Follows the smoke-test contract in ``rlinf/robotics/tools/lekiwi/camera.py``:
     connect, wait for a frame within 3 s, read one observation, disconnect.
     An error is reported with its text: a missing ``libGL`` or an unopenable
     device reads differently from a node that opens but never frames.
