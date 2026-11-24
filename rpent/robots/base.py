@@ -62,8 +62,19 @@ def _resolve_robot(name: str) -> Any:
 
 
 def enumerate_robots() -> tuple[str, ...]:
-    """Return the names of importable robot packages under ``robots``."""
-    import robots
+    """Return the names of importable robot packages under ``robots``.
+
+    A core-only wheel ships no ``robots`` package, so discovery finds nothing;
+    the CLI then explains that robot packages come from a checkout.
+    """
+    try:
+        import robots
+    except ModuleNotFoundError as exc:
+        if exc.name == "robots":
+            return ()
+        # The package is present but a dependency it imports is not; keep that
+        # error, which names what to install.
+        raise
 
     return tuple(
         sorted(

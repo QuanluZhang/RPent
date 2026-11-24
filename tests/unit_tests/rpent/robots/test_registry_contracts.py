@@ -19,6 +19,7 @@ from argparse import ArgumentParser
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from string import Formatter
+import sys
 
 import pytest
 
@@ -135,6 +136,42 @@ PROMPT_VARIABLES = {
         "output_dir": Path("/output"),
     },
 }
+
+
+class _BlockImport:
+    """A meta-path finder that fails one top-level import with a given name."""
+
+    def __init__(self, module: str, missing: str) -> None:
+        self._module = module
+        self._missing = missing
+
+    def find_spec(self, name, path=None, target=None):
+        if name == self._module:
+            raise ModuleNotFoundError(f"No module named {self._missing!r}", name=self._missing)
+        return None
+
+
+def test_robot_discovery_survives_a_core_only_wheel(monkeypatch) -> None:
+    # A core-only wheel ships no ``robots`` package; discovery finds nothing so
+    # the CLI can explain it instead of failing on the import.
+    monkeypatch.delitem(sys.modules, "robots", raising=False)
+    monkeypatch.setattr(
+        sys, "meta_path", [_BlockImport("robots", "robots"), *sys.meta_path]
+    )
+
+    assert enumerate_robots() == ()
+
+
+def test_robot_discovery_keeps_an_internal_import_error(monkeypatch) -> None:
+    # A robot package that cannot import its own dependency must not look like
+    # "no robots"; the error names the package to install.
+    monkeypatch.delitem(sys.modules, "robots", raising=False)
+    monkeypatch.setattr(
+        sys, "meta_path", [_BlockImport("robots", "torch"), *sys.meta_path]
+    )
+
+    with pytest.raises(ModuleNotFoundError, match="torch"):
+        enumerate_robots()
 
 
 def _format_fields(template: str) -> set[str]:

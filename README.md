@@ -127,16 +127,18 @@ RPent is built for four kinds of users:
 
 ```bash
 git clone https://github.com/RLinf/RPent rpent && cd rpent
-pip install -e ".[libero-pro]"  # Recommended default (LIBERO-PRO)
+# Recommended default (LIBERO-PRO):
+./rpent-install.sh install robot-libero --venv .venv-libero
+source .venv-libero/bin/activate
 
-# Other environment configurations:
-pip install -e ".[robocasa]"    # RoboCasa
-pip install -e ".[robotwin]"    # RoboTwin
-pip install -e ".[robolab]"     # RoboLab policy environment
-pip install -e ".[franka]"      # Franka and dual Franka
+# Other robots install the same way, each into its own environment.
+./rpent-install.sh install robot-robocasa --venv .venv-robocasa
+./rpent-install.sh install robot-robotwin --venv .venv-robotwin
+./rpent-install.sh install robot-robolab --venv .venv-robolab
+./rpent-install.sh install robot-franka --venv .venv-franka
 ```
 
-`.[libero-pro]` is the recommended default. See the [installation docs](https://rpent.readthedocs.io/en/latest/rst_source/get_started/quickstart.html) for other environments.
+`robot-libero` is the recommended default. See the [installation docs](https://rpent.readthedocs.io/en/latest/rst_source/get_started/installation.html) for every component and diagnostics.
 
 For RoboLab simulator setup, model checkpoints, and a single-task example, see the
 [RoboLab guide](https://rpent.readthedocs.io/en/latest/rst_source/simulators/robolab.html).

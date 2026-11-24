@@ -128,17 +128,18 @@ RPent 面向以下四类用户：
 ```bash
 git clone https://github.com/RLinf/RPent rpent && cd rpent
 # 默认推荐（LIBERO-PRO）：
-pip install -e ".[libero-pro]"
+./rpent-install.sh install robot-libero --venv .venv-libero
+source .venv-libero/bin/activate
 
-# 其他环境配置：
-pip install -e ".[robocasa]"    # RoboCasa
-pip install -e ".[robotwin]"    # RoboTwin
-pip install -e ".[robolab]"     # RoboLab 策略环境
-pip install -e ".[franka]"      # Franka / 双臂 Franka
+# 其他机器人用同样的方式安装到各自的环境。
+./rpent-install.sh install robot-robocasa --venv .venv-robocasa
+./rpent-install.sh install robot-robotwin --venv .venv-robotwin
+./rpent-install.sh install robot-robolab --venv .venv-robolab
+./rpent-install.sh install robot-franka --venv .venv-franka
 ```
 
-`.[libero-pro]` 是默认推荐配置。其他环境见
-[安装文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/get_started/quickstart.html)。
+`robot-libero` 是默认推荐。全部组件和诊断方法见
+[安装文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/get_started/installation.html)。
 
 RoboLab 仿真环境安装、模型权重与单任务运行示例参见
 [RoboLab 指南](https://rpent.readthedocs.io/zh-cn/latest/rst_source/simulators/robolab.html)。
