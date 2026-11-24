@@ -1,8 +1,9 @@
 schema = 2
 name = "model-openpi"
-# The probe names the upstream distribution: the wrapper and RLinf's loader
-# import the Pi0.5 runtime lazily, so importing the wrapper would not prove the
-# packages a run needs are installed.
+# The probe names the upstream distribution because the server loads OpenPI
+# lazily. Standalone server installs must pair this component with infra-rlinf
+# (e.g. `./rpent-install.sh install model-openpi infra-rlinf --venv .venv-openpi`);
+# robot-robodojo supplies its own RLinf fork through sim-robodojo instead.
 probe = "openpi"
 python = ">=3.10,<3.13"
 

@@ -30,7 +30,7 @@ Pi0.5 VLA 服务
 
 .. code-block:: bash
 
-   ./rpent-install.sh install model-openpi --venv .venv-openpi
+   ./rpent-install.sh install model-openpi infra-rlinf --venv .venv-openpi
    source .venv-openpi/bin/activate
    export PI05_CHECKPOINT_PATH=/path/to/rlinf-pi05-libero-130-fullshot-sft
    python -m components.models.openpi.server \

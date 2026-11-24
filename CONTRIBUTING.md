@@ -103,9 +103,8 @@ Follow these conventions while developing:
   CPU machine; use fakes when model or service output is needed. Installer
   units use synthetic manifests under `tests/unit_tests/rpent/install/`;
   contracts over the checked-in components and their dependencies belong in
-  `tests/unit_tests/installs/`. Repository structure checks and the
-  selection of test environments for a change live in `tests/tooling/`, with
-  their tests beside them.
+  `tests/unit_tests/installs/`. Repository layout and import-boundary checks
+  live in `tests/tooling/`, with their tests under `tests/unit_tests/tooling/`.
 - **Follow the project style.** Pre-commit handles Ruff formatting and linting.
   Public Python APIs should have type hints and Google-style docstrings, and
   runtime messages should use the project logger rather than `print`.

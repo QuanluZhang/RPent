@@ -18,12 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from rpent.install.discovery import Catalog, discover
 from rpent.install.manifest import (
     COMPONENT_DIRECTORIES,
     DEFAULT_MANYLINUX,
     KINDS,
+    Catalog,
     Component,
+    discover,
 )
 
 #: Repository root: this file sits one directory below it.

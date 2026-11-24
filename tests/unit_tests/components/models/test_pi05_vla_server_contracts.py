@@ -15,21 +15,13 @@
 import numpy as np
 import pytest
 
+from components.models.openpi.client import Pi05VLAClient
+from components.models.openpi.server import (
+    PI05_EMBODIMENTS,
+    Pi05VLAFacade,
+    build_model_cfg,
+)
 from rpent.components.models.facade import BaseVLAFacade
-from rpent.install.require import MissingComponentError
-
-try:
-    from components.models.openpi.client import Pi05VLAClient
-    from components.models.openpi.server import (
-        PI05_EMBODIMENTS,
-        Pi05VLAFacade,
-        build_model_cfg,
-    )
-except MissingComponentError:
-    # The unit environment installs the core contracts and Torch, not each
-    # model component; the server loads its runtime through the component
-    # guard at import time.
-    pytest.skip("model-openpi is not installed", allow_module_level=True)
 
 
 @pytest.mark.parametrize("embodiment", ["dual_franka", "yam"])

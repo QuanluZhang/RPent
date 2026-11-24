@@ -83,7 +83,7 @@ VLA 启动函数也使用 ``AMConfig.spawn_worker()``。平台保留各自的服
 
 由于模型运行在独立进程中，添加基于模型的原语还需要以下组件：
 
-1. **编写 ``components/models/<name>/server.py``。** 该进程只持有模型权重和 CUDA 上下文。模型包同时需要 ``component.toml`` 清单。继承 :class:`rpent.components.models.facade.BaseVLAFacade`，实现 ``predict``，并通过扩展 ``_register_rpc`` 注册其他模型 RPC：
+1. 编写 ``components/models/<name>/server.py``。该进程只持有模型权重和 CUDA 上下文。模型包同时需要 ``component.toml`` 清单。继承 :class:`rpent.components.models.facade.BaseVLAFacade`，实现 ``predict``，并通过扩展 ``_register_rpc`` 注册其他模型 RPC：
 
    - 默认传输方式为 **HTTP**，通过 ``POST /call`` 传输 JSON，适合
      LIBERO/Pi0.5 使用的扁平 ``image + state`` 数据。

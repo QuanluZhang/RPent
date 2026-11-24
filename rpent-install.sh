@@ -15,13 +15,8 @@
 
 set -euo pipefail
 
-# Run the installer on a fresh checkout.
-#
-# The ``rpent-install`` console script exists only after a component is
-# installed, so this launcher runs ``rpent.cli.install`` in a throwaway uv
-# environment that adds only the manifest parser dependency. The environment
-# workflow calls it; installer arguments pass straight through.
-
+# Bootstrap rpent-install from a fresh checkout while preserving the caller's
+# working directory so relative --venv and --root arguments resolve naturally.
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -30,6 +25,9 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-cd "$repo_root"
+export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
+export RPENT_DEFAULT_ROOT="$repo_root"
+export RPENT_INSTALL_BOOTSTRAP=1
+export RPENT_CALLER_VENV="${VIRTUAL_ENV:-}"
 exec uv run --no-project --python 3.11 --with packaging -- \
   python -m rpent.cli.install "$@"

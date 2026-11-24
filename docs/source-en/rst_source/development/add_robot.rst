@@ -48,28 +48,20 @@ order:
 Entry Point and Component Manifest
 ----------------------------------
 
-A robot is a component: a directory under ``robots/`` plus a
-``component.toml`` that tells ``rpent-install`` how to install it. The target
-skeleton is:
+A robot is a component: a directory under ``robots/`` plus a ``component.toml``
+that tells ``rpent-install`` how to install it. For a new robot named
+``myrobot``, use this directory layout:
 
 .. code-block:: text
 
    robots/myrobot/
        component.toml          # name, probe, python, requires, dependencies
        __init__.py             # lazy package entry point
-       spec.py                 # RobotSpec, factories, Dashboard spec, runtime hooks
-       config.py               # CLI flags, RunConfig, task selection
-       adapter.py              # env client/facade and native env adapter
-       prompts/__init__.py
-       prompts/domain.py       # system_prompt()/user_prompt() factories
-       native_tools.py         # toolkit, primitives, tool definitions
-
-The slices in this checkout still use their pre-migration names
-(``robot_spec.py``, ``prompt_bundle.py``, ``toolkit.py``, ``env_client.py``,
-``env_server.py``, ``tools.py``); the a_5 migration maps them to the roles
-above. Write new slices against the target names; the sections below name the
-current file for each role until that migration lands. The layout check rejects
-a retired name in any slice that did not already carry it.
+       robot_spec.py           # RobotSpec, factories, Dashboard spec, runtime hooks
+       env_client.py           # MyEnvClient — agent-side RPC stub (§1)
+       prompt_bundle.py        # system_prompt()/user_prompt() factories (§2)
+       toolkit.py              # MyRobotToolkit + primitives + tool definitions (§3)
+       env_server.py           # server-side facade + RPC server (§1)
 
 ``component.toml`` declares what ``rpent-install`` reads:
 
@@ -118,16 +110,16 @@ Export the factories through ``__getattr__``:
    from typing import TYPE_CHECKING, Any
 
    if TYPE_CHECKING:
-       from robots.myrobot.spec import get_robot_spec, get_toolkit
+       from robots.myrobot.robot_spec import get_robot_spec, get_toolkit
 
    __all__ = ["get_robot_spec", "get_toolkit"]
 
 
    def __getattr__(name: str) -> Any:
        if name in __all__:
-           from robots.myrobot import spec
+           from robots.myrobot import robot_spec
 
-           return getattr(spec, name)
+           return getattr(robot_spec, name)
        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 The registry in ``rpent/robots/base.py`` imports ``robots.<name>`` on demand
@@ -135,13 +127,13 @@ and calls these two functions:
 
 .. code-block:: python
 
-   # robots/myrobot/spec.py (robot_spec.py until the a_5 rename)
+   # robots/myrobot/robot_spec.py
    from rpent.dashboard.events import DashboardEventSink
    from rpent.memory import MemoryManager
    from rpent.robots.robot_spec import RobotSpec, RunConfig
    from rpent.robots.prompt_bundle import PromptBundle
    from rpent.utils.config import get_memory_dir
-   from robots.myrobot.prompts.domain import system_prompt, user_prompt
+   from robots.myrobot.prompt_bundle import system_prompt, user_prompt
 
    MYROBOT_DASHBOARD_SPEC = {...}
 
@@ -161,7 +153,7 @@ and calls these two functions:
        dashboard_events: DashboardEventSink,
        config: RunConfig,
    ):
-       from robots.myrobot.native_tools import MyRobotToolkit
+       from robots.myrobot.toolkit import MyRobotToolkit
        return MyRobotToolkit(
            runtime_kwargs=runtime_kwargs,
            dashboard_events=dashboard_events,
@@ -199,8 +191,7 @@ and ``primitives`` is the ordered allowlist of Toolkit actions displayed and
 executable as Dashboard controls. Camera tabs are discovered from the PNG
 artifacts in each recorded step. Keep task suggestions in the spec so
 importing the robot does not require simulator packages. See
-``robots/libero/robot_spec.py`` (``spec.py`` after a_5) for the reference
-shape.
+``robots/libero/robot_spec.py`` for the reference shape.
 
 The callback receives the parsed session arguments, so it can select components
 based on options such as ``--am-backend``. For a fixed layout, return the static
@@ -228,10 +219,9 @@ in §5.
 1. Environment Adapter
 ----------------------
 
-The adapter exposes the environment to the agent over RPC. Its target name is
-``adapter.py``; this checkout still splits it into ``env_client.py`` and
-``env_server.py``, and a_5 merges them. The client converts method calls into
-RPC requests, and the server-side facade handles those requests.
+The adapter exposes the environment to the agent over RPC using ``env_client.py``
+and ``env_server.py``. The client converts method calls into RPC requests, and
+the server-side facade handles those requests.
 
 1.1 Env Client (agent Side)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -316,10 +306,10 @@ teardown.
 2. Prompts
 ----------
 
-Prompt factories belong in ``prompts/domain.py`` (``prompt_bundle.py`` until
-a_5). Define two factories, ``system_prompt()`` and ``user_prompt()``, and
-build a ``PromptBundle(system=system_prompt, user=user_prompt)`` in the
-robot's ``spec.py`` (``robot_spec.py`` today; see the entry point above). Each factory returns an ordered
+Prompt factories belong in ``prompt_bundle.py``. Define two factories,
+``system_prompt()`` and ``user_prompt()``, and build a
+``PromptBundle(system=system_prompt, user=user_prompt)`` in the robot's
+``robot_spec.py`` (see the entry point above). Each factory returns an ordered
 ``dict[str, PromptNode]`` of titled sections; ``PromptBundle.render`` assembles
 and fills them. One prompt serves every planner (API loop, Claude Code, Codex):
 refer to tools by their bare names (``move_to``, ...) and note once that the
@@ -328,7 +318,7 @@ maintain separate prompt copies for CLI and API planners.
 
 .. code-block:: python
 
-   # robots/myrobot/prompts/domain.py
+   # robots/myrobot/prompt_bundle.py
    from robots.myrobot.prompts import system as system_parts
    from robots.myrobot.prompts import user as user_parts
    from rpent.prompt.utils import PromptNode
@@ -360,10 +350,10 @@ render time.
 3. Native Tools and Toolkit
 ---------------------------
 
-This role is ``native_tools.py`` after a_5; the existing slices split it into
-``toolkit.py`` and ``tools.py``. It owns the tool schemas, primitives, per-step
-state records, and the list of tools available through MCP. LIBERO keeps the
-two pieces separate; a new robot may start with one module.
+``toolkit.py`` (optionally alongside ``tools.py``) owns the tool schemas,
+primitives, per-step state records, and the list of tools available through
+MCP. LIBERO keeps the two pieces separate; a new robot may start with one
+module.
 
 A toolkit module typically contains four pieces:
 

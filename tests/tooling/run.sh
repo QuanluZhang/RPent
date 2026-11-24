@@ -13,18 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Run one repository tool from a fresh checkout. The tools read the component
-# manifests, so they bootstrap with the same dependency the installer needs
-# instead of assuming an environment is already installed.
+# Run repository structure checks from a fresh checkout.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 case "${1:-}" in
   layout) module=tests.tooling.layout ;;
-  matrix) module=tests.tooling.matrix ;;
-  affected) module=tests.tooling.affected ;;
   *)
-    echo "usage: $0 {layout|matrix|affected} [args...]" >&2
+    echo "usage: $0 layout [args...]" >&2
     exit 2
     ;;
 esac

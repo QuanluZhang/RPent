@@ -396,14 +396,14 @@ Target50 包含 50 个厨房任务，共运行 340 次。以下使用 Codex、GP
    .. _robocasa-protocol-history:
    .. _robocasa-evaluation-protocol:
 
-   当前评测同时使用 task-specific 与 global memory。``target50.json`` 使用 ``robocasa-harness-vla-v2`` 协议和 ``1.1`` 结果格式，参考配置为 GPT-5.5。软件依赖由 ``pyproject.toml`` 管理。自定义任务、seed 或规划器配置时，将当前协议的清单传给校验器：
+   当前评测同时使用 task-specific 与 global memory。``target50.json`` 使用 ``robocasa-harness-vla-v2`` 协议和 ``1.1`` 结果格式，参考配置为 GPT-5.5。软件依赖由 RoboCasa 相关组件清单（``robot-robocasa``、``sim-robocasa``、``model-rldx``）管理。自定义任务、seed 或规划器配置时，将当前协议的清单传给校验器：
 
    .. code-block:: bash
 
       python -m robots.robocasa.eval.validate_target50 /path/to/results \
          --manifest /path/to/manifest.json
 
-   比较实验时保留同一份记忆，并在本地记录 HF commit 或文件哈希，以及源码依赖 ``rpent`` 分支实际安装的提交。程序不锁定 memory 版本，校验器也不比较各次运行的记忆正文。
+   比较实验时保留同一份记忆，并在本地记录 HF commit 或文件哈希，以及组件清单中锁定的源码提交。程序不锁定 memory 版本，校验器也不比较各次运行的记忆正文。
 
 .. dropdown:: Target50 公开成绩
 
@@ -487,8 +487,8 @@ VLA 推理检查
 启动与推理
 ~~~~~~~~~~~~
 
-- **旧环境缺少 RLDX 接口：** 重新执行 ``rpent-install install robot-robocasa``，再在环境中重装 ``rlinf-rldx``。旧 PyPI wheel 即使版本号相同，也可能缺少所需接口。
-- **缺少导航相机：** 若报错包含 ``mobilebase0_navview``，重新执行 ``rpent-install install robot-robocasa`` 以更新 Robosuite，不要手改 XML。
+- **旧环境缺少 RLDX 接口：** 重新执行 ``rpent-install install robot-robocasa --venv .venv-robocasa``，再在环境中重装 ``rlinf-rldx``。旧 PyPI wheel 即使版本号相同，也可能缺少所需接口。
+- **缺少导航相机：** 若报错包含 ``mobilebase0_navview``，重新执行 ``rpent-install install robot-robocasa --venv .venv-robocasa`` 以更新 Robosuite，不要手改 XML。
 - **目录权限错误：** 使用 ``sim-robocasa`` 安装的源码依赖，XML 转换应写入临时目录。将 ``NUMBA_CACHE_DIR`` 指向可写目录，无需修改包权限。
 - **CUDA/EGL 不可用：** 按本机配置选择 Torch/torchvision，再运行 :ref:`环境自检 <environment-smoke-tests>` 验证 GPU 运算和渲染；仅查看驱动版本不足以确认可用。
 - **离线找不到模型文件：** 核对 :ref:`支持文件和缓存路径 <robocasa-vla-configuration>`。``NO_ALBUMENTATIONS_UPDATE=1`` 只关闭更新检查，无需因此修改图像处理或 geometry fallback 参数。

@@ -12,17 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Report a missing optional dependency as a component installation error.
-
-Components declare their packages in ``component.toml``; importing them
-directly at the point of use keeps core imports working without every robot
-package installed. This guard replaces local ``try: import ... except
-ImportError: ... = None`` fallbacks with one actionable message. The first
-argument is the component that owns the package, which is also the name
-``rpent-install`` accepts, not the import name::
-
-    torch = require("model-sam3", "torch")
-"""
+"""Import an optional dependency or raise an actionable component install error."""
 
 from __future__ import annotations
 
@@ -31,17 +21,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from rpent.install.fingerprint import current_venv, read_fingerprint
+from rpent.install.installer import current_venv, read_fingerprint
 
 
 class MissingComponentError(ImportError):
-    """An optional module is missing from the environment that should own it."""
-
-
-def _current_environment() -> tuple[Path | None, dict[str, Any] | None]:
-    """Return the active venv and the fingerprint ``rpent-install`` recorded."""
-    venv = current_venv()
-    return venv, read_fingerprint(venv) if venv is not None else None
+    """An optional module is missing from the current environment."""
 
 
 def _install_hint(
@@ -49,56 +33,35 @@ def _install_hint(
 ) -> str:
     if fingerprint is None:
         return (
-            f"install the environment that provides component {component!r} from "
-            f"an RPent checkout with `./rpent-install.sh install {component}`, or "
-            f"add {component!r} to an environment that already holds the "
-            "components it runs with"
+            f"install component {component!r} from an RPent checkout with "
+            f"`./rpent-install.sh install {component}`"
         )
-    # Every suggestion that rebuilds this environment has to name it: without
-    # ``--venv`` the installer targets the default path instead.
     venv_flag = f" --venv {venv}" if venv is not None else ""
     targets = list(fingerprint.get("targets") or [])
-    installed = ", ".join(targets) or "no recorded components"
     if targets and component in fingerprint.get("components", {}):
         return (
-            f"component {component!r} belongs to this environment, so rerun "
+            f"component {component!r} belongs to this environment; rerun "
             f"`rpent-install install {' '.join(targets)}{venv_flag}` to repair it"
         )
+    installed = ", ".join(targets) or "no recorded components"
     combined = " ".join([*targets, component])
     return (
-        f"this environment was installed for {installed}; component "
-        f"{component!r} is not part of it. Install it in its own environment with "
-        f"`rpent-install install {component}`, or rebuild this environment with "
-        f"it: `rpent-install install {combined}{venv_flag} --force`"
+        f"this environment was installed for {installed}; install {component!r} "
+        f"in its own environment with `rpent-install install {component}`, or "
+        f"rebuild this environment with `rpent-install install {combined}"
+        f"{venv_flag} --force`"
     )
 
 
 def require(component: str, module: str) -> ModuleType:
-    """Import ``module`` or raise an error naming ``component`` and its install.
+    """Import ``module`` or raise :class:`MissingComponentError` naming ``component``.
 
-    An environment ``rpent-install`` recorded must also list ``component``: the
-    installer editable-installs the checkout, so the component's module is
-    importable in every environment it builds, including one installed for a
-    different component set. An environment without a fingerprint is trusted to
-    whatever is importable.
-
-    Only a missing ``module`` or one of its parent packages becomes a
-    ``MissingComponentError``. A component whose own imports fail — a package
-    its manifest forgot, a broken native library — keeps its original
-    exception, so the message does not send the user to reinstall something
-    that is already there.
-
-    Raises:
-        MissingComponentError: ``component`` is not installed here, or
-            ``module`` or a parent package is unimportable.
+    Attempts ``importlib.import_module(module)`` directly so any environment
+    that already supplies ``module`` (such as ``infra-unit_cpu`` or a venv with
+    overlaid packages) works regardless of which component name was recorded in
+    ``rpent-install.json``. Only when ``module`` or one of its parent packages
+    is actually missing does this consult the fingerprint to build the hint.
     """
-    venv, fingerprint = _current_environment()
-    recorded = fingerprint.get("components") if fingerprint is not None else None
-    if isinstance(recorded, dict) and component not in recorded:
-        raise MissingComponentError(
-            f"component {component!r} is not installed in this environment; "
-            f"{_install_hint(component, venv, fingerprint)}"
-        )
     try:
         return importlib.import_module(module)
     except ModuleNotFoundError as exc:
@@ -107,6 +70,8 @@ def require(component: str, module: str) -> ModuleType:
             missing == module or module.startswith(f"{missing}.")
         ):
             raise
+        venv = current_venv()
+        fingerprint = read_fingerprint(venv) if venv is not None else None
         raise MissingComponentError(
             f"component {component!r} requires {module!r}, which is not "
             f"importable in this environment; "

@@ -163,7 +163,7 @@ liberopro-download-assets --skip-existing
 
 > 💡 访问 Hugging Face 较慢时，可走镜像加速：`HF_ENDPOINT=https://hf-mirror.com liberopro-download-assets --skip-existing`。
 
-其他仿真器见[安装文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/get_started/quickstart.html)。
+其他仿真器见[安装文档](https://rpent.readthedocs.io/zh-cn/latest/rst_source/get_started/installation.html)。
 
 **3. 配置密钥与 checkpoint，然后运行。**
 
@@ -181,10 +181,10 @@ export PI05_CHECKPOINT_PATH=$PWD/checkpoints/RLinf-Pi05-LIBERO-130-fullshot-SFT
 
 # SAM 3.0 checkpoint —— 从以下地址下载：
 # https://modelscope.cn/models/facebook/sam3
-pip install -U modelscope
+uv pip install -U modelscope
 
-modelscope download facebook/sam3 \
-  --local-dir ./checkpoints/sam3
+modelscope download --model facebook/sam3 sam3.pt \
+  --local_dir ./checkpoints/sam3
 
 export SAM3_CHECKPOINT_PATH=$PWD/checkpoints/sam3/sam3.pt
 export LIBERO_TYPE=pro

@@ -237,9 +237,7 @@ def test_a_checkout_less_install_reports_the_missing_layer_before_argparse(
     # A wheel install carries no ``robots`` package, so discovery finds none and
     # ``--robot`` names a value outside the choice list.
     monkeypatch.setattr(cli, "enumerate_robots", lambda: ())
-    monkeypatch.setattr(
-        cli, "_missing_planner_module", lambda: "pydantic_ai"
-    )
+    monkeypatch.setattr(cli, "_missing_planner_module", lambda: "pydantic_ai")
 
     assert cli.main() == 1
 

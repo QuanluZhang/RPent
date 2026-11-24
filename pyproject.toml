@@ -110,12 +110,13 @@ include-package-data = true
 # package opens by path: the dashboard frontend, the robot defaults, the
 # evaluation manifests, and RoboDojo's uv override.
 "*" = ["component.toml"]
+"components.sim.robodojo" = ["requirements/*.txt"]
 "components.sim.robotwin" = ["eval/*.json"]
 "robots.dual_franka" = ["config/*.yaml"]
 "robots.franka" = ["config/*.yaml"]
 "robots.libero" = ["guides/*.md"]
 "robots.robocasa" = ["eval/*.json"]
-"robots.robodojo" = ["guides/*.md", "requirements/*.txt"]
+"robots.robodojo" = ["guides/*.md"]
 "robots.robotwin" = ["guides/*.md"]
 "rpent.dashboard" = ["*.html", "static/*.css", "static/*.js"]
 "robots.yam" = ["config/*.yaml", "config/*.json", "guides/*.md"]

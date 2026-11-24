@@ -12,25 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Component manifests, resolution, and the ``rpent-install`` installer.
+"""Component manifests, resolution, and the ``rpent-install`` installer."""
 
-A component is the only install unit: one name, one manifest, one import probe,
-and the packages only that component needs. An environment contains the
-components named on the command line plus the closure of their ``requires``.
-Installed environments carry ``rpent-install.json`` with the target components,
-their manifest hashes, and the package freeze hash used by ``rpent-install
-doctor`` and run artifacts.
-"""
-
-from rpent.install.discovery import Catalog, discover, discover_components
 from rpent.install.errors import InstallConfigError, InstallError
-from rpent.install.fingerprint import (
+from rpent.install.installer import (
     FINGERPRINT_NAME,
     fingerprint_path,
     read_fingerprint,
     write_fingerprint,
 )
-from rpent.install.manifest import Component
+from rpent.install.manifest import Catalog, Component, discover, discover_components
 from rpent.install.require import MissingComponentError, require
 from rpent.install.resolve import Resolution, resolve
 

@@ -31,7 +31,7 @@
 配置 Molmo
 ------------
 
-Molmo 在自己的 Python 环境中运行，因为它的模型栈锁定了独立的 Torch 和 Transformers 版本。Molmo 的模型代码还需要 ``transformers>=4.57``，而 RoboTwin 栈锁定 ``4.51.3``；组件清单声明这两者互斥，因此 ``rpent-install check`` 会拒绝同时点名两者的环境。
+Molmo 在自己的 Python 环境中运行，因为它的模型栈锁定了独立的 Torch 和 Transformers 版本。Molmo 的模型代码还需要 ``transformers>=4.57``，而 RoboTwin 栈锁定 ``4.51.3``；组件清单声明这两者互斥，因此 ``rpent-install check`` 会拒绝同时指定两者的环境。
 
 把 ``model-molmo`` 安装到独立环境；它的依赖包含锁定版本的 PyTorch 和 torchvision：
 

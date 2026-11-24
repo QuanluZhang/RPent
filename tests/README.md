@@ -4,10 +4,9 @@ RPent keeps fast, offline unit tests under `unit_tests`. Real-simulator smoke
 tests, model component and policy-chain tests, and explicit real-robot
 diagnostics belong under `e2e_tests`. Unit tests mirror the production module or
 repository data they exercise; GPU tests are grouped by robot stack.
-Environment smoke tests can run without model checkpoints. Repository structure
-checks and the selection of test environments for a change belong under
-`tooling`; they run before any environment is installed and never ship in the
-wheel.
+Environment smoke tests can run without model checkpoints. Repository layout
+and import-boundary checks belong under `tooling`; they run before any
+environment is installed and never ship in the wheel.
 
 ## Directory layout
 
@@ -15,11 +14,9 @@ wheel.
 tests/
 ├── README.md
 ├── conftest.py           # fixtures shared by more than one test directory
-├── tooling/              # repository checks and CI selection
-│   ├── layout.py         # repository structure and import boundaries
-│   ├── affected.py       # changed paths -> components, tests and environments
-│   ├── matrix.py         # component-to-runner partition for full CI
-│   └── run.sh            # bootstrap entry point for the three modules
+├── tooling/              # repository layout and import-boundary checks
+│   ├── layout.py         # component manifest, import boundary, and lazy entry checks
+│   └── run.sh            # bootstrap entry point for layout checks
 ├── e2e_tests/
 │   ├── common.py         # shared assertions and runtime lifecycle helpers
 │   ├── run_gpu_suite.sh  # clean-environment entry point for one robot stack
@@ -40,7 +37,7 @@ tests/
     │   ├── tools/
     │   └── utils/
     ├── installs/          # contracts over the real checked-in install data
-    ├── tooling/           # tests for the repository checks and CI selection
+    ├── tooling/           # tests for repository layout checks
     ├── robots/<name>/     # tests for one robot slice
     │   ├── dual_franka/
     │   ├── efe/
@@ -81,16 +78,11 @@ them when the first test for that module lands.
   The installer units and the install-data contracts use only the core and
   `infra-dev` dependencies, and `fast ci` runs them in the `infra-dev`
   environment.
-- Put repository checks and CI selection under `tests/tooling/`. `layout.py`
-  enforces the repository structure and import boundaries, `affected.py` maps
-  changed paths to the components, tests and environments they can change, and
-  `matrix.py` owns the runner partition that full CI installs. Run them through
-  `tests/tooling/run.sh`; like the install launcher, it bootstraps without an
-  installed environment.
-- Keep the tests for those checks under `tests/unit_tests/tooling/`, so the
-  default unit run collects them instead of only the paths `affected.py`
-  selects. Workflow contract tests belong to `tests/unit_tests/installs/`
-  because the workflows read the install data.
+- Put repository layout checks under `tests/tooling/`. Run them through
+  `tests/tooling/run.sh layout`; like the install launcher, it bootstraps
+  without an installed environment.
+- Keep the tests for those checks under `tests/unit_tests/tooling/` so the
+  default unit run collects them.
 - Keep one-off fakes in the test module that uses them. Put shared fixtures in
   the nearest `conftest.py`. `tests/conftest.py` holds the component, catalog
   and TOML fixtures that more than one directory uses; a module
@@ -117,12 +109,10 @@ PyTorch CPU index:
 .venv-unit-cpu/bin/python -m pytest tests/unit_tests -v
 ```
 
-Run the repository checks and inspect the scope of a change with:
+Run the repository layout check with:
 
 ```bash
-tests/tooling/run.sh layout
-tests/tooling/run.sh matrix --check
-tests/tooling/run.sh affected --base origin/main --head HEAD
+./tests/tooling/run.sh layout
 ```
 
 ## RoboCasa environment smoke tests

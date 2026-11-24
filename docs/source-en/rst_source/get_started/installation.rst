@@ -1,261 +1,198 @@
 Installation
 ============
 
-An RPent environment is the set of components you name on the command line,
-plus the closure of their ``requires``. Each component declares its own
-dependencies and Python range in ``component.toml``.
-``rpent-install`` creates the virtual environment, installs that closure with
-the core ``rpent`` package, runs an import probe for every component it
-installs, and writes an installation fingerprint.
+Install an isolated RPent environment for a robot, simulator, or standalone
+model service from a source checkout, and verify that its dependencies work.
+For a complete first LIBERO-PRO run with assets and checkpoints, follow
+:doc:`quickstart`.
 
 Requirements
 ------------
 
 - Linux ``x86_64`` and `uv <https://docs.astral.sh/uv/getting-started/installation/>`_.
-- A Python minor version every selected component supports. ``rpent-install``
-  uses the newest of 3.12, 3.11, and 3.10 that the whole closure accepts and
-  asks uv to install it; the interpreter that runs the command does not decide
-  the environment's version.
-- A GPU and driver compatible with the selected component's PyTorch build.
+- Python 3.10–3.12. ``rpent-install`` automatically selects the newest supported
+  minor accepted by all requested components and asks ``uv`` to provision it.
+- An NVIDIA GPU and driver compatible with the selected component's PyTorch build.
 
-Components
-----------
+Common Environments
+-------------------
 
-The name prefix says what a component is and where its code lives:
+Each RPent component lives in a directory with a ``component.toml`` manifest
+(``robots/<name>/`` for robots, ``components/{sim,models,tools,infra}/<name>/``
+for shared services and test stacks). Installing a ``robot-*`` component pulls
+in the planner layer, tools, simulator, and required model services into one
+virtual environment.
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 34 48
+   :widths: 20 46 34
 
-   * - Prefix
-     - Location
-     - Contents
-   * - ``robot-``
-     - ``robots/<name>/``
-     - A robot slice: native translation, tools, and its runtime wiring.
-   * - ``sim-``
-     - ``components/sim/<name>/``
-     - A simulator service that robots and models share.
-   * - ``model-``
-     - ``components/models/<name>/``
-     - A model service: VLA, grounding, or action-model backend.
-   * - ``tool-``
-     - ``components/tools/<name>/``
-     - A tool that depends only on the core, such as the flywheel exporter, or
-       a capability library a robot slice adapts, such as the RGB-D tools.
-   * - ``infra-``
-     - ``components/infra/<name>/``
-     - Packages an environment needs without owning code (RLinf runtime, test
-       tools, CPU Torch).
+   * - Environment
+     - Install command
+     - Python & guide
+   * - LIBERO / LIBERO-PRO
+     - ``./rpent-install.sh install robot-libero --venv .venv-libero``
+     - 3.12 · :doc:`../simulators/libero`
+   * - LIBERO-plus
+     - ``./rpent-install.sh install robot-libero_plus --venv .venv-libero-plus``
+     - 3.12 · :doc:`../simulators/libero`
+   * - RoboCasa365
+     - ``./rpent-install.sh install robot-robocasa --venv .venv-robocasa``
+     - 3.10 · :doc:`../simulators/robocasa`
+   * - RoboTwin
+     - ``./rpent-install.sh install robot-robotwin --venv .venv-robotwin``
+     - 3.11 · :doc:`../simulators/robotwin`
+   * - RoboLab
+     - ``./rpent-install.sh install robot-robolab --venv .venv-robolab``
+     - 3.11 · :doc:`../simulators/robolab`
+   * - RoboDojo
+     - ``./rpent-install.sh install robot-robodojo --venv .venv-robodojo``
+     - 3.11 · :doc:`../simulators/robodojo`
+   * - Single-Arm Franka
+     - ``./rpent-install.sh install robot-franka --venv .venv-franka``
+     - 3.12 · :doc:`../real_world_robots/franka`
+   * - Dual-Arm Franka
+     - ``./rpent-install.sh install robot-dual_franka --venv .venv-dual-franka``
+     - 3.12 · :doc:`../real_world_robots/dual_franka`
+   * - YAM (control machine)
+     - ``./rpent-install.sh install robot-yam --venv .venv-yam-real``
+     - 3.11 · :doc:`../real_world_robots/yam`
+   * - Standalone Pi0.5 VLA
+     - ``./rpent-install.sh install model-openpi infra-rlinf --venv .venv-openpi``
+     - 3.12 · :doc:`../guides/advanced_deployment`
+   * - Standalone Molmo
+     - ``./rpent-install.sh install model-molmo --venv .venv-molmo``
+     - 3.12 · :doc:`../guides/flash`
+   * - Minimal core
+     - ``./rpent-install.sh install infra-minimal --venv .venv-minimal``
+     - 3.12 · CLI & discovery check
+   * - Development / unit tests
+     - ``./rpent-install.sh install infra-dev --venv .venv-dev``
+     - 3.12 · ``infra-unit_cpu`` adds CPU Torch
 
-Every component is one directory holding its ``component.toml``.
-``rpent-install list`` prints the components the checkout provides, so a
-checkout without a component's directory cannot install it. A component
-that installs packages for code it does not own contributes only that manifest:
-the ``infra-`` components are all of this shape, and ``sim-libero_plus``
-installs the LIBERO-plus package whose environment server ships with
-``sim-libero``.
-
-The core package installs in two layers. Plain ``rpent`` is the runtime layer:
-component and model contracts, RPC, model clients, and the installer, so a
-simulator or model environment can hold it without the planner stack.
-``rpent[planner]`` adds the planner adapters, execution sessions, tools,
-prompts, and the dashboard. A component that imports the planner declares
-``planner = true`` in its
-``component.toml``, and every environment holding that component installs the
-planner layer as well; without the flag an environment gets the runtime layer
-only. ``install`` fails with a named component list if a
-component sets the flag and the checkout's ``pyproject.toml`` has no ``planner``
-extra.
-
-The dependency direction is ``rpent`` ← ``components/sim`` ←
-``components/models`` ← ``robots``; ``components/tools`` depends only on
-``rpent`` and, for a capability library, the model clients' result types. A
-robot environment therefore pulls in its simulator, model services, and tools
-automatically:
-
-.. code-block:: bash
-
-   rpent-install list
-
-``robot-libero`` requires ``sim-libero``, ``model-openpi``, ``model-sam3``,
-``tool-flywheel``, and ``tool-rgbd``; ``robot-robocasa`` requires
-``sim-robocasa`` and ``model-rldx``; ``robot-robodojo`` requires ``sim-robodojo``, ``model-sam3``,
-``model-openpi``, ``model-awomo05``, and ``model-vpp2``. Model services no
-robot requires (``model-molmo``, ``model-cosmos3``, ``model-cosmos_policy``,
-``model-fast_wam``, ``model-apxinf``, ``model-uniwam``, ``model-xpolicylab``)
-install in their own environment.
-
-A ``robot-`` component is installed in one step: its environment holds the
-planner, the tools, the simulator, and the model servers the robot needs, so
-``install robot-libero`` needs no second environment for the models or the
-exporter. Every other component installs in an environment of its own with the
-core ``rpent`` package, and a robot environment reaches it through the
-component's client instead of importing it. ``robot-yam`` is the exception: its
-slice carries the YAM runtime and connects to a Pi0.5 policy installed
-separately as ``model-openpi``.
-
-List and check components
--------------------------
-
-.. code-block:: bash
-
-   rpent-install list
-   rpent-install check --all
-
-``check`` reads the manifests, computes each component's ``requires`` closure,
-and reports unknown names, unsupported Python versions, conflicting exact pins,
-and the conflicts components declare with ``env_conflicts``. Naming several
-components checks the environment they form together, which is the one
-``install`` creates; ``--all`` checks each component in an environment of its
-own. ``check`` downloads nothing. ``--resolve`` additionally uses
-``uv pip compile`` to prove the declared dependencies have a solution for the
-Linux ``x86_64`` target and discards the compiled file afterwards.
-
-Install an environment
+Install an Environment
 ----------------------
 
-From a checkout, install a component into its own virtual environment:
-
-.. code-block:: bash
-
-   rpent-install install robot-libero --venv .venv-libero
-   source .venv-libero/bin/activate
-
-On a fresh checkout the ``rpent-install`` console script does not exist yet.
-``rpent-install.sh`` bootstraps it without installing RPent first:
+From a fresh checkout, use ``./rpent-install.sh`` to bootstrap the installer
+and create a virtual environment:
 
 .. code-block:: bash
 
    ./rpent-install.sh install robot-libero --venv .venv-libero
+   source .venv-libero/bin/activate
 
-Name several components to compose one environment. A non-robot component
-installs on its own host this way, and the robot environment connects to it
-over its client:
+Once activated, ``rpent-install`` is available directly inside the environment.
+Pass multiple component names to compose one environment (for example,
+``model-openpi infra-rlinf`` for a standalone Pi0.5 VLA host, or
+``robot-libero infra-dev`` for development with test tools). Pass ``--dry-run``
+to inspect the generated requirements without installing.
 
-.. code-block:: bash
+**PyPI Mirrors and CUDA PyTorch Backends**
 
-   rpent-install install model-openpi --venv .venv-openpi
-   rpent-install install sim-libero_plus model-openpi model-sam3 --venv .venv-libero-plus-models
-
-``rpent-install`` runs from a checkout, where it reads the ``component.toml``
-manifests under ``robots/`` and ``components/``. A non-editable ``pip install
-rpent`` from the published wheel provides the CLI without those directories, so
-an installed ``rpent`` finds no robots and refuses to start one. To run a robot,
-build its environment from a checkout with
-``./rpent-install.sh install robot-<name> --venv <venv>``;
-``pip install -e .`` adds only RPent's own dependencies, not a robot's. Setting
-``RPENT_REPO_ROOT`` to a checkout lets an installed ``rpent`` run a robot by
-hand, but no fingerprint attests that environment and ``doctor`` does not
-check it.
-
-An environment contains exactly the components you named and their closure.
-What it contains decides whether an existing venv can be reused, so naming a
-component that pulls another in through ``requires`` and naming both describe
-the same environment, and a component whose packages changed describes the same
-environment too. A venv holding a different set of components is refused;
-install that set under a different ``--venv``, or pass ``--force`` to replace
-it. ``--force`` rebuilds the environment at that path and puts the replaced
-environment back if the rebuild fails, so it never deletes a directory that is
-not a virtualenv. A venv that already holds packages but was
-not created by ``rpent-install`` is refused too: its packages belong to whoever
-installed them, and only an empty one (a fresh ``uv venv``) is used as it is.
-An environment left by a failed install keeps the rendered requirements, so
-rerunning the same command adopts and finishes it; requirements rendered for
-a different environment are refused, as they would be for a finished one. The
-rendered requirements and the installed package versions are written into the
-environment itself, so they never outlive it. Without ``--venv``, a target set
-installs into ``.rpent/venvs/<components joined by +>`` under the checkout;
-``.rpent/`` is local state and is ignored by git, so later ``install`` runs
-reuse the same environment. ``doctor`` is not target-driven: activate that
-environment or pass its path with ``--venv``.
-
-Re-running the command reuses an environment whose recorded installation inputs
-are unchanged, and rebuilds one whose manifests, override files, index settings,
-or ``[tool.uv]`` settings changed; a package an earlier manifest added does not
-survive the rebuild. The installer generates requirements from
-the manifests, then lets ``uv pip install`` resolve them. Direct version constraints and Git revisions
-remain in the manifests; transitive versions may differ between fresh installs
-as upstream packages change. ``--dry-run`` prints the generated requirements
-without installing.
-
-Any number of components may contribute packages. Index settings
-(``index-url``, ``extra-index-urls``, ``index-strategy``) are merged across the
-closure; two components that disagree on them make the environment invalid
-rather than silently picking one.
-
-Common environments
--------------------
-
-Every command below installs only a component that exists in this checkout;
-``rpent-install list`` prints the current set. A robot, simulator, or model
-entry can appear here before its component directory lands, and it fails with
-``unknown component`` until it does.
+Pass ``--index-url`` to install through a PyPI mirror, or ``--torch-backend``
+to select a PyTorch wheel index (``auto``, ``cpu``, ``cu124``, ``cu126``,
+``cu128``):
 
 .. code-block:: bash
 
-   rpent-install install infra-minimal --venv .venv-minimal
-   rpent-install install infra-dev --venv .venv-dev
-   rpent-install install infra-unit_cpu --venv .venv-unit-cpu
-   rpent-install install robot-libero --venv .venv-libero
-   rpent-install install sim-libero_plus --venv .venv-libero-plus
-   rpent-install install robot-robocasa --venv .venv-robocasa
-   rpent-install install robot-robotwin --venv .venv-robotwin
-   rpent-install install robot-robolab --venv .venv-robolab
-   rpent-install install robot-franka --venv .venv-franka
-   rpent-install install robot-dual_franka --venv .venv-dual-franka
-   rpent-install install robot-yam --venv .venv-yam
-   rpent-install install robot-robodojo --venv .venv-robodojo
-   rpent-install install model-molmo --venv .venv-molmo
-   rpent-install install model-openpi --venv .venv-openpi
+   ./rpent-install.sh install robot-libero --venv .venv-libero \
+     --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+     --torch-backend cu126
 
-``infra-minimal`` is the core environment: RPent and its own dependencies with
-no robot, simulator, or model package, which is enough to verify CLI and robot
-discovery. ``infra-dev`` adds the test tools. ``infra-unit_cpu`` adds
-those tools and a CPU Torch-built model stack for the unit suite. The robot
-environments cover the supported real robots and simulators; see each
-simulator or robot page for platform preparation, checkpoints, and assets.
-``sim-libero_plus`` replaces ``sim-libero`` rather than adding to it: LIBERO-plus
-needs robosuite<1.5, so the two package sets cannot share an environment. The
-plus environment hosts the environment service; the robot runs from
-``robot-libero`` and connects to it (see :doc:`../simulators/libero`).
+You can also set ``UV_INDEX_URL``, ``UV_DEFAULT_INDEX``, or
+``UV_TORCH_BACKEND`` in the shell environment before invoking the installer.
 
-Diagnose an environment
+.. dropdown:: Migrating from Legacy ``pyproject.toml`` Extras
+
+   Per-robot ``pyproject.toml`` extras (``uv pip install -e ".[...]"``) are
+   replaced by ``rpent-install`` components:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 36 64
+
+      * - Former extra
+        - Current command
+      * - ``.[libero]``, ``.[libero-pro]``
+        - ``./rpent-install.sh install robot-libero --venv .venv-libero``
+      * - ``.[libero-plus]``
+        - ``./rpent-install.sh install robot-libero_plus --venv .venv-libero-plus``
+      * - ``.[robocasa]``
+        - ``./rpent-install.sh install robot-robocasa --venv .venv-robocasa``
+      * - ``.[robotwin]``
+        - ``./rpent-install.sh install robot-robotwin --venv .venv-robotwin``
+      * - ``.[robodojo]``
+        - ``./rpent-install.sh install robot-robodojo --venv .venv-robodojo``
+      * - ``.[franka]``
+        - ``./rpent-install.sh install robot-franka --venv .venv-franka``
+      * - ``.[yam]``
+        - ``./rpent-install.sh install robot-yam --venv .venv-yam-real``
+      * - ``.[flywheel]``
+        - ``./rpent-install.sh install tool-flywheel --venv .venv-flywheel``
+      * - ``.[molmo]``
+        - ``./rpent-install.sh install model-molmo --venv .venv-molmo``
+      * - ``.[sam3]``
+        - ``./rpent-install.sh install model-sam3 --venv .venv-sam3``
+      * - ``.[test]``
+        - ``./rpent-install.sh install infra-dev --venv .venv-dev``
+
+.. dropdown:: Environment Reuse, Overlays, and Wheel Scope
+
+   - **Default path:** omitting ``--venv`` installs into
+     ``.rpent/venvs/<components joined by +>`` inside the checkout.
+   - **Reuse and overlays:** re-running ``install`` for the same component
+     closure updates packages in place and preserves overlaid packages (such as
+     ``modelscope``, ``pre-commit``, or editable RLinf checkouts). Pass
+     ``--force`` to recreate the virtual environment cleanly; if recreation
+     fails, the previous environment is restored.
+   - **Foreign virtual environments:** ``rpent-install`` refuses to install
+     into a non-empty directory that is not a virtual environment, or into a
+     virtual environment created by another tool without ``--force``. For
+     externally managed environments (such as Harbor in :doc:`../simulators/efe`
+     or the YAM inference machine in :doc:`../real_world_robots/yam`), install
+     RPent directly with ``uv pip install -e .``.
+   - **PyPI wheel vs. checkout:** ``pip install rpent`` installs the core
+     runtime only (``rpent[planner]`` adds planner adapters and the dashboard)
+     without ``robots/`` or ``components/``. Run robots from a source checkout
+     built with ``./rpent-install.sh``.
+
+List and Check Components
+-------------------------
+
+Inspect all available components and validate manifests before installing:
+
+.. code-block:: bash
+
+   ./rpent-install.sh list
+   ./rpent-install.sh check --all
+
+``check`` computes each component's dependency closure without downloading
+packages, verifying Python ranges, exact-pin conflicts, and ``env_conflicts``.
+Across a closure, ``extra-index-urls`` are unioned, while conflicting
+``index-url`` or ``index-strategy`` declarations are rejected. Passing several
+component names checks whether they can share one environment.
+
+.. dropdown:: Dependency Resolution Check (``check --resolve``)
+
+   Add ``--resolve`` to run ``uv pip compile`` against Linux ``x86_64``
+   (default ``manylinux_2_31``, or ``manylinux_2_35`` when required by a
+   component such as ``sim-robodojo``) and discard the temporary output.
+   Checking environments that build ``nvidia-curobo`` requires a Linux host
+   with ``CUDA_HOME`` set.
+
+Diagnose an Environment
 -----------------------
 
+Verify that an installed virtual environment matches its manifests, passes
+``uv pip check``, and can import every component in its closure:
+
 .. code-block:: bash
 
-   rpent-install doctor --venv .venv-libero
-   rpent-install doctor --venv .venv-libero --fingerprint
+   ./rpent-install.sh doctor --venv .venv-libero
+   ./rpent-install.sh doctor --venv .venv-libero --fingerprint
 
-``doctor`` compares the stored fingerprint with every recorded installation
-input (each component's manifest hash, its override files, and the repository's
-``[tool.uv]`` settings), checks the recorded Python version and platform, runs
-``uv pip check`` and the component probes, and compares the installed package
-set with its recorded freeze hash. ``uv`` resolves from the checkout, so the
-compared settings do not depend on the directory the command is invoked from;
-user-level ``uv`` configuration (``~/.config/uv``) is outside the comparison.
-A venv installed for a different set of components is reported as needing a
-reinstall rather than as drifted. ``--fingerprint`` prints the stored
-fingerprint and its hash instead of running the checks.
-
-``doctor`` describes the environment ``rpent-install`` created from the
-manifests. Some robot and simulator guides add packages to that environment
-afterwards, such as an editable RLinf checkout, an SDK, or an adapter package.
-Those additions change the installed package set, so ``doctor`` reports the
-environment as drifted, and rerunning ``install`` re-records the new set. Run
-``doctor`` on an environment built from the manifests when the fingerprint
-should attest to the component closure alone. One guide goes further:
-:doc:`../simulators/efe` installs RPent into Harbor's own virtualenv, which
-``rpent-install`` does not create, so that environment has no fingerprint and
-``doctor`` does not cover it.
-
-For ``check --resolve``, ``linux-x86_64`` targets ``manylinux_2_31`` (glibc
-2.31, Ubuntu 20.04 or newer): current GPU wheels are published for newer
-baselines, so a 2.17 target cannot resolve them. A component whose packages are
-published only for a newer baseline raises the target for its whole closure
-with ``manylinux = "2_35"`` in its manifest; ``sim-robodojo`` does this for
-Isaac Sim. Checking a configuration that
-builds cuRobo with ``--resolve`` needs a Linux host with ``CUDA_HOME`` set
-because cuRobo builds metadata during resolution. A failed resolution is
-reported without stopping checks of the remaining components.
+``--fingerprint`` prints the stored ``rpent-install.json`` metadata and its
+hash without running checks. If you overlaid extra packages into the
+environment (such as ``modelscope`` or a custom CUDA PyTorch wheel) and both
+``uv pip check`` and all component probes succeed, ``doctor`` reports a
+``warn`` line instead of failing.

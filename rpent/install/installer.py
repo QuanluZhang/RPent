@@ -12,85 +12,157 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Create a component environment, install it, and record its fingerprint."""
+"""Create, update, and diagnose component virtual environments."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from rpent.install.discovery import Catalog, discover
 from rpent.install.errors import InstallError
-from rpent.install.fingerprint import (
-    FINGERPRINT_NAME,
-    FINGERPRINT_SCHEMA_FIELD,
-    freeze_sha256,
-    read_fingerprint,
-    runtime_platform,
-    source_state,
-    write_fingerprint,
-    write_freeze,
-)
-from rpent.install.manifest import Component
-from rpent.install.requirements import (
-    FINGERPRINT_SCHEMA,
+from rpent.install.manifest import Catalog, Component, discover
+from rpent.install.resolve import (
+    Resolution,
+    choose_python,
+    index_options,
+    python_errors,
     read_core_dependencies,
     read_planner_dependencies,
     render_requirements,
     requirements_sha256,
-)
-from rpent.install.resolve import (
-    Resolution,
-    choose_python,
-    python_errors,
     resolve,
 )
 from rpent.utils.config import get_repo_root
 
-#: Per-checkout state: the virtualenvs an install created.
 STATE_DIR = ".rpent"
-#: The rendered requirements stay inside the environment they describe, next to
-#: the fingerprint. A copy under the checkout would outlive the environment and
-#: duplicate state that belongs to it.
-REQUIREMENTS_NAME = "rpent-install.requirements.txt"
-#: The rendered requirements open with the components the environment holds.
-#: An install that failed before recording a fingerprint still identifies its
-#: environment that way; the rendered lines alone change with a manifest's
-#: packages, which describe the same environment.
-_IDENTITY_PREFIX = "# rpent-install components: "
+FINGERPRINT_NAME = "rpent-install.json"
+DEFAULT_COMMAND_TIMEOUT = 3600.0
+OK = "ok"
+WARN = "warn"
+FAIL = "fail"
+
+_BASE_DISTRIBUTIONS = frozenset(
+    {"distutils", "pip", "pkg-resources", "setuptools", "wheel"}
+)
+#: Role modules probed for checkout-owned components.
+ROLE_MODULES = {
+    "robot": ("robot_spec", "env_client"),
+    "sim": ("env_server",),
+    "model": ("server",),
+    "tool": ("cli",),
+}
+CHECKOUT_PROBES = frozenset({"robots", "components"})
+
+
+@dataclass(frozen=True)
+class Check:
+    """One diagnostic result returned by :func:`check_installation`."""
+
+    status: str
+    message: str
 
 
 def environment_id(targets: Iterable[str]) -> str:
-    """Return the file-name-safe identifier of a target set."""
+    """Return the directory-safe identifier of a target set."""
     return "+".join(sorted(set(targets)))
 
 
 def default_venv(root: Path, targets: Iterable[str]) -> Path:
-    """Return the default virtualenv path for a target set."""
+    """Return the default virtualenv path for ``targets``."""
     return root / STATE_DIR / "venvs" / environment_id(targets)
 
 
-def requirements_file(venv: Path) -> Path:
-    """Return the rendered requirements path inside ``venv``."""
-    return Path(venv) / REQUIREMENTS_NAME
-
-
 def venv_python(venv: Path) -> Path:
-    """Return the interpreter path inside a virtualenv."""
+    """Return the Python executable inside ``venv``."""
     candidate = Path(venv) / "bin" / "python"
     if candidate.exists():
         return candidate
     return Path(venv) / "Scripts" / "python.exe"
 
 
+def fingerprint_path(venv: Path) -> Path:
+    """Return the fingerprint file path for ``venv``."""
+    return Path(venv) / FINGERPRINT_NAME
+
+
+def read_fingerprint(venv: Path) -> dict[str, Any] | None:
+    """Return the venv's fingerprint dict, or ``None`` if absent or unreadable."""
+    try:
+        data = json.loads(fingerprint_path(venv).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_fingerprint(venv: Path, fingerprint: dict[str, Any]) -> Path:
+    """Atomically write ``fingerprint`` into ``venv``."""
+    destination = fingerprint_path(venv)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(fingerprint, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
+def fingerprint_sha256(fingerprint: dict[str, Any]) -> str:
+    """Return the canonical SHA-256 hash of ``fingerprint``."""
+    payload = json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def freeze_sha256(frozen: str) -> str:
+    """Return the order-independent SHA-256 hash of a ``uv pip freeze`` listing."""
+    lines = sorted(line.strip() for line in frozen.splitlines() if line.strip())
+    return hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
+
+
+def runtime_platform() -> str:
+    """Return the current platform tag (e.g. ``linux-x86_64``)."""
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system == "linux":
+        return "linux-" + ("aarch64" if machine in {"aarch64", "arm64"} else "x86_64")
+    if system == "darwin":
+        return "darwin-" + ("arm64" if machine in {"aarch64", "arm64"} else "x86_64")
+    return f"{system}-{machine}"
+
+
+def current_venv() -> Path | None:
+    """Return the active virtual environment, or ``None``."""
+    if os.environ.get("RPENT_INSTALL_BOOTSTRAP") == "1":
+        caller_venv = os.environ.get("RPENT_CALLER_VENV")
+        if caller_venv and (Path(caller_venv) / "pyvenv.cfg").is_file():
+            return Path(caller_venv)
+        return None
+    env_venv = os.environ.get("VIRTUAL_ENV")
+    if env_venv:
+        candidate = Path(env_venv)
+        if (candidate / "pyvenv.cfg").is_file():
+            return candidate
+    prefix = Path(sys.prefix)
+    if (prefix / "pyvenv.cfg").is_file():
+        return prefix
+    return None
+
+
 def find_uv() -> str:
-    """Return the uv executable or raise an actionable error."""
+    """Return the ``uv`` executable path or raise an actionable error."""
     override = os.environ.get("RPENT_UV")
     if override:
         return override
@@ -103,12 +175,6 @@ def find_uv() -> str:
     return uv
 
 
-#: A command that neither finishes nor fails leaves the installer waiting
-#: forever. The limit is generous because a first GPU install downloads several
-#: gigabytes, and it exists to turn a hung network call into an error.
-DEFAULT_COMMAND_TIMEOUT = 3600.0
-
-
 def run_command(
     command: list[str],
     *,
@@ -117,12 +183,7 @@ def run_command(
     cwd: Path | None = None,
     timeout: float = DEFAULT_COMMAND_TIMEOUT,
 ) -> str:
-    """Run ``command`` and return its captured stdout.
-
-    ``cwd`` is passed to every ``uv`` call that resolves or installs packages:
-    uv discovers ``[tool.uv]`` from its working directory, so resolution must
-    happen in the checkout rather than in the caller's directory.
-    """
+    """Run ``command`` and return stdout if ``capture`` is True."""
     try:
         result = subprocess.run(
             command,
@@ -149,12 +210,9 @@ def run_command(
 
 
 def resolve_targets(
-    targets: Iterable[str],
-    catalog: Catalog,
-    *,
-    root: Path,
+    targets: Iterable[str], catalog: Catalog, *, root: Path
 ) -> Resolution:
-    """Resolve component names against the checkout's manifests."""
+    """Resolve ``targets`` against the checkout's manifests and ``pyproject.toml``."""
     return resolve(
         targets,
         catalog,
@@ -163,23 +221,35 @@ def resolve_targets(
     )
 
 
-#: Distributions a virtualenv holds before anything is installed into it.
-_BASE_DISTRIBUTIONS = frozenset(
-    {"distutils", "pip", "pkg-resources", "setuptools", "wheel"}
-)
+def closure(components: dict[str, Component]) -> tuple[str, ...]:
+    """Return the sorted component names in an environment's closure."""
+    return tuple(sorted(components))
+
+
+def recorded_closure(fingerprint: dict[str, Any]) -> tuple[str, ...] | None:
+    """Return the sorted component closure recorded in ``fingerprint``."""
+    recorded = fingerprint.get("components")
+    if not isinstance(recorded, dict) or not recorded:
+        return None
+    names = tuple(sorted(recorded))
+    return names if all(isinstance(name, str) for name in names) else None
+
+
+def _python_version(python: Path) -> str:
+    try:
+        return run_command(
+            [str(python), "-c", "import platform; print(platform.python_version())"],
+            capture=True,
+        ).strip()
+    except InstallError:
+        return "unknown"
 
 
 def _installed_distributions(python: Path) -> list[str] | None:
-    """Return the distributions in ``python``'s environment, or ``None``.
-
-    ``None`` means the interpreter could not be asked, which is itself a
-    broken environment; the caller reports that rather than an empty list.
-    """
     source = (
         "import importlib.metadata\n"
         "print('\\n'.join(sorted({"
-        "distribution.metadata['Name'] or '' "
-        "for distribution in importlib.metadata.distributions()"
+        "d.metadata['Name'] or '' for d in importlib.metadata.distributions()"
         "})))\n"
     )
     try:
@@ -189,98 +259,21 @@ def _installed_distributions(python: Path) -> list[str] | None:
     return [line for line in output.splitlines() if line]
 
 
-def _rendered_identity(rendered: Path) -> tuple[str, ...] | None:
-    """Return the component closure a rendered requirements file names."""
-    try:
-        first = rendered.read_text(encoding="utf-8").splitlines()[0]
-    except (OSError, IndexError):
-        return None
-    if not first.startswith(_IDENTITY_PREFIX):
-        return None
-    return tuple(first[len(_IDENTITY_PREFIX) :].split())
-
-
-def _reject_foreign_venv(destination: Path, resolution: Resolution) -> None:
-    """Reject a virtualenv that holds packages but no installation fingerprint.
-
-    Such an environment was not created by ``rpent-install``, so its packages
-    belong to whoever installed them; adding this environment's packages would
-    mix two dependency sets in one interpreter. Two exceptions are ours: a
-    ``uv venv`` nothing was installed into yet is empty, and an environment
-    whose rendered requirements name the same component closure is one whose
-    install failed after writing them, so rerunning the command repairs it even
-    if a manifest's packages changed. Requirements naming another closure
-    belong to an install of that other environment.
-    """
-    rendered = requirements_file(destination)
-    if rendered.is_file():
-        if _rendered_identity(rendered) == closure(resolution.components):
-            return
-        raise InstallError(
-            f"{destination} holds the requirements of a different environment "
-            f"and no {FINGERPRINT_NAME}: an install that failed after writing "
-            "them. Install this environment under a different `--venv`, or pass "
-            "`--force` to replace it"
-        )
-    python = venv_python(destination)
-    if not python.exists():
+def _check_not_non_venv_path(destination: Path) -> None:
+    """Refuse to overwrite or pollute an existing non-virtualenv path."""
+    if not destination.exists():
         return
-    packages = _installed_distributions(python)
-    if packages is None:
-        raise InstallError(
-            f"{destination} has a Python interpreter that cannot be run; "
-            "remove it and install the environment again"
-        )
-    foreign = sorted(
-        name
-        for name in packages
-        if name.lower().replace("_", "-") not in _BASE_DISTRIBUTIONS
-    )
-    if not foreign:
+    if (destination / "pyvenv.cfg").is_file():
         return
-    shown = ", ".join(foreign[:5])
-    if len(foreign) > 5:
-        shown += f", and {len(foreign) - 5} more"
-    raise InstallError(
-        f"{destination} already contains packages ({shown}) but has no "
-        f"{FINGERPRINT_NAME}, so rpent-install did not create it; install this "
-        "environment under a different `--venv`, remove it first, or pass "
-        "`--force` to replace it"
-    )
-
-
-def closure(components: dict[str, Component]) -> tuple[str, ...]:
-    """Return an environment's identity: the components in its closure.
-
-    The closure decides what the environment contains, so it decides whether
-    two command lines describe the same environment. The names typed on the
-    command line name its directory and record how it was created. A manifest
-    that changed its packages describes the same environment, so rerunning the
-    command rebuilds it from what the manifests now declare. A manifest that
-    changed its ``requires`` describes another environment.
-    """
-    return tuple(sorted(components))
-
-
-def recorded_closure(fingerprint: dict[str, Any]) -> tuple[str, ...] | None:
-    """Return the identity a fingerprint records, or ``None`` without one."""
-    recorded = fingerprint.get("components")
-    if not isinstance(recorded, dict) or not recorded:
-        return None
-    names = tuple(sorted(recorded))
-    return names if all(isinstance(name, str) for name in names) else None
+    if not destination.is_dir() or any(destination.iterdir()):
+        raise InstallError(
+            f"{destination} exists and is not an empty directory or virtualenv; "
+            "choose a different `--venv` path"
+        )
 
 
 def _replace(destination: Path) -> Path | None:
-    """Move an environment aside so it can be rebuilt.
-
-    ``--force`` asks to rebuild the environment at this path, and changed
-    installation inputs make a rebuild necessary; neither means "delete whatever
-    is here": only a virtualenv is replaced. It is renamed rather than deleted
-    because a virtualenv's scripts embed the path it was created at, so the
-    rebuild has to create the new environment at that path, and a rebuild that
-    fails restores the old one instead of leaving none.
-    """
+    """Move an existing virtualenv aside so a failed rebuild can restore it."""
     if not destination.exists():
         return None
     if not (destination / "pyvenv.cfg").is_file():
@@ -294,73 +287,92 @@ def _replace(destination: Path) -> Path | None:
     return backup
 
 
-def _restore_replaced(destination: Path, backup: Path | None) -> None:
-    """Put a replaced environment back after its rebuild failed."""
-    if backup is None:
-        return
-    shutil.rmtree(destination, ignore_errors=True)
-    backup.rename(destination)
-
-
-def _discard_replaced(backup: Path | None) -> None:
-    """Remove the environment a completed rebuild replaced."""
-    if backup is not None:
-        shutil.rmtree(backup, ignore_errors=True)
-
-
-def _check_existing(
-    destination: Path,
-    resolution: Resolution,
-    *,
-    force: bool,
-    expected_inputs: str,
+def _prepare_destination(
+    destination: Path, resolution: Resolution, *, force: bool
 ) -> Path | None:
-    """Reject a virtualenv that holds a different environment.
-
-    Two command lines that name different components can still describe the
-    same ``requires`` closure, so the environment is identified by the
-    components it contains rather than by the names that were typed.
-
-    A matching closure whose recorded installation inputs changed is rebuilt:
-    installing the new requirements over the old interpreter would keep the
-    packages an earlier manifest added.
-
-    Returns the environment moved aside for a rebuild, or ``None`` when the
-    environment can be reused.
-    """
+    """Validate ``destination`` and optionally move it aside for ``--force``."""
+    _check_not_non_venv_path(destination)
     if force:
         return _replace(destination)
+
     existing = read_fingerprint(destination)
-    if existing is None:
-        _reject_foreign_venv(destination, resolution)
+    if existing is not None:
+        recorded = recorded_closure(existing)
+        if recorded is None:
+            raise InstallError(
+                f"{destination} has an invalid fingerprint; pass `--force` to rebuild it"
+            )
+        wanted = closure(resolution.components)
+        if recorded != wanted:
+            added = sorted(set(wanted) - set(recorded))
+            dropped = sorted(set(recorded) - set(wanted))
+            details = [f"  adds {n}" for n in added] + [f"  drops {n}" for n in dropped]
+            raise InstallError(
+                f"{destination} already holds a different environment:\n"
+                + "\n".join(details)
+                + "\nuse a different `--venv`, or pass `--force` to replace it"
+            )
         return None
-    recorded = recorded_closure(existing)
-    if recorded is None:
-        # A fingerprint without a component table cannot identify what the
-        # environment holds; installing over it would mix unknown packages
-        # with the requested closure and record only the latter.
+
+    python = venv_python(destination)
+    if not python.exists():
+        return None
+    packages = _installed_distributions(python)
+    if packages is None:
         raise InstallError(
-            f"{destination} has a fingerprint without a component table, so the "
-            "components it holds are unknown; pass `--force` to rebuild it"
+            f"{destination} has a Python interpreter that cannot be run; "
+            "remove it and rerun"
         )
-    wanted = closure(resolution.components)
-    if recorded != wanted:
-        added = sorted(set(wanted) - set(recorded))
-        dropped = sorted(set(recorded) - set(wanted))
-        details = [f"  adds {name}" for name in added]
-        details += [f"  drops {name}" for name in dropped]
+    foreign = sorted(
+        name
+        for name in packages
+        if name.lower().replace("_", "-") not in _BASE_DISTRIBUTIONS
+    )
+    if foreign:
+        shown = ", ".join(foreign[:5])
+        if len(foreign) > 5:
+            shown += f", and {len(foreign) - 5} more"
         raise InstallError(
-            f"{destination} already holds a different environment:\n"
-            + "\n".join(details)
-            + "\ninstall this set under a different `--venv`, or pass `--force` to "
-            "replace it"
+            f"{destination} already contains packages ({shown}) but has no "
+            f"{FINGERPRINT_NAME}, so rpent-install did not create it; choose a "
+            "different `--venv`, pass `--force` to replace it, or use "
+            "`uv pip install -e .` if adding RPent to an externally managed environment"
         )
-    if existing.get("requirements_sha256") != expected_inputs:
-        # The components are the same but their packages, overrides, or index
-        # settings are not. A rebuild is the only way to drop what an earlier
-        # manifest installed.
-        return _replace(destination)
     return None
+
+
+def probe_modules(
+    probe: str, kind: str, *, source: Path | None = None
+) -> tuple[str, ...]:
+    """Return the import paths probed for a component."""
+    if probe.split(".")[0] not in CHECKOUT_PROBES:
+        return (probe,)
+    roles = ROLE_MODULES.get(kind, ())
+    if source is not None:
+        roles = tuple(
+            role
+            for role in roles
+            if (source / f"{role}.py").is_file() or (source / role).is_dir()
+        )
+    return (probe, *(f"{probe}.{role}" for role in roles))
+
+
+def probe_command(
+    python: Path, probe: str, kind: str, *, source: Path | None = None
+) -> list[str]:
+    """Return the isolated Python command that probes a component."""
+    modules = probe_modules(probe, kind, source=source)
+    lines = [f"import {modules[0]}"]
+    if len(modules) > 1:
+        lines.insert(0, "import importlib")
+        lines.extend(f'importlib.import_module("{m}")' for m in modules[1:])
+    return [str(python), "-I", "-c", "\n".join(lines) + "\n"]
+
+
+def repair_command(resolution: Resolution, *, force: bool = False) -> str:
+    """Return the command that reinstalls ``resolution``."""
+    command = f"rpent-install install {' '.join(resolution.targets)}"
+    return f"{command} --force" if force else command
 
 
 def install(
@@ -370,23 +382,17 @@ def install(
     venv: Path | None = None,
     dry_run: bool = False,
     force: bool = False,
+    index_url: str | None = None,
+    torch_backend: str | None = None,
     verbose: bool = True,
 ) -> dict[str, Any]:
-    """Install ``targets`` and their closure into one environment.
-
-    ``force`` replaces the environment at ``destination`` instead of rejecting
-    it when it holds different components or was not created by
-    ``rpent-install``. Without ``force``, an environment with the requested
-    closure is reused when its recorded installation inputs still match and
-    rebuilt when they changed.
-
-    Returns the written fingerprint.
-    """
+    """Install ``targets`` and their closure into one virtualenv."""
     repo_root = (root or get_repo_root()).resolve()
     catalog = discover(repo_root)
     resolution = resolve_targets(targets, catalog, root=repo_root)
     if not resolution.ok:
         raise InstallError("\n".join(resolution.errors))
+
     core = read_core_dependencies(repo_root)
     planner = read_planner_dependencies(repo_root)
     requirements = render_requirements(
@@ -408,81 +414,60 @@ def install(
         core_dependencies=core,
         planner_dependencies=planner,
     )
-
-    # Find uv before ``--force`` replaces anything: an environment is only
-    # replaced when the rebuild can start.
     uv = find_uv()
-    replaced = _check_existing(
-        destination,
-        resolution,
-        force=force,
-        expected_inputs=expected_inputs,
-    )
-    if verbose and replaced is not None and not force:
-        print(f"installation inputs changed; rebuilding {destination}")
+    replaced = _prepare_destination(destination, resolution, force=force)
+    cmd_env = dict(os.environ)
+    if torch_backend:
+        cmd_env["UV_TORCH_BACKEND"] = torch_backend
+
     try:
-        if venv_python(destination).exists():
-            interpreter = _python_version(venv_python(destination))
-        else:
-            interpreter = choose_python(resolution.components.values())
+        python = venv_python(destination)
+        interpreter = (
+            _python_version(python)
+            if python.exists()
+            else choose_python(resolution.components.values())
+        )
         unsupported = python_errors(
             interpreter, resolution.components.values(), owner=str(destination)
         )
         if unsupported:
             raise InstallError(
                 "\n".join(unsupported)
-                + "\nno interpreter supports every component; install a Python "
-                "the closure supports and rerun with `--force` to rebuild "
-                f"{destination}"
+                + "\nrerun with `--force` to recreate the environment with a "
+                "supported Python version"
             )
 
-        python = venv_python(destination)
         if not python.exists():
             if verbose:
                 print(f"$ {uv} venv --python {interpreter} {destination}")
             run_command(
                 [uv, "venv", "--python", interpreter, str(destination)],
+                env=cmd_env,
                 cwd=repo_root,
             )
             python = venv_python(destination)
         if not python.exists():
-            raise InstallError(
-                f"{destination} exists but has no Python interpreter; remove it and "
-                f"rerun `{repair_command(resolution)}`"
-            )
+            raise InstallError(f"{destination} has no Python interpreter")
 
-        requirements_path = requirements_file(destination)
-        # Rendered requirements without a fingerprint mean the previous install
-        # stopped after writing package metadata. ``uv`` treats that metadata as
-        # an installed package even when its files are gone, so the repair
-        # reinstalls every requirement instead of accepting what the failed run
-        # left behind.
-        repairing = (
-            requirements_path.is_file() and read_fingerprint(destination) is None
-        )
-        requirements_path.write_text(
-            f"{_IDENTITY_PREFIX}{' '.join(closure(resolution.components))}\n"
-            + requirements,
-            encoding="utf-8",
-        )
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".txt", prefix="rpent-req-", encoding="utf-8", delete=False
+        ) as req_file:
+            req_file.write(requirements)
+            req_path = Path(req_file.name)
+        try:
+            install_cmd = [uv, "pip", "install", "--python", str(python)]
+            install_cmd.extend(index_options(resolution, index_url_override=index_url))
+            for component in resolution.components.values():
+                for override in component.overrides:
+                    install_cmd.extend(["--override", str(override)])
+            install_cmd.extend(["-r", str(req_path)])
+            if verbose:
+                print(f"$ {' '.join(install_cmd)}")
+            run_command(install_cmd, env=cmd_env, cwd=repo_root)
+        finally:
+            req_path.unlink(missing_ok=True)
 
-        install_command = [uv, "pip", "install", "--python", str(python)]
-        install_command.extend(index_options(resolution))
-        for component in resolution.components.values():
-            for override in component.overrides:
-                install_command.extend(["--override", str(override)])
-        if repairing:
-            install_command.append("--reinstall")
-        install_command.extend(["-r", str(requirements_path)])
-        if verbose:
-            print(f"$ {' '.join(install_command)}")
-        # uv discovers ``[tool.uv]`` by walking up from its working directory, so
-        # run it in the checkout: the recorded inputs live there, and an
-        # environment installed from another directory must not resolve with
-        # other settings.
-        run_command(install_command, cwd=repo_root)
-
-        editable = [
+        editable_cmd = [
             uv,
             "pip",
             "install",
@@ -493,27 +478,36 @@ def install(
             str(repo_root),
         ]
         if verbose:
-            print(f"$ {' '.join(editable)}")
-        run_command(editable, cwd=repo_root)
+            print(f"$ {' '.join(editable_cmd)}")
+        run_command(editable_cmd, env=cmd_env, cwd=repo_root)
 
-        _probe_components(resolution, python, verbose=verbose)
+        for name, component in resolution.components.items():
+            if verbose:
+                print(f"probe {name}: import {component.probe}")
+            try:
+                run_command(
+                    probe_command(
+                        python, component.probe, component.kind, source=component.path
+                    ),
+                    capture=True,
+                )
+            except InstallError as exc:
+                raise InstallError(
+                    f"component {name!r} is not importable in {destination}\n"
+                    f"  probe: import {component.probe}\n{exc}"
+                ) from exc
+
         run_command([uv, "pip", "check", "--python", str(python)], cwd=repo_root)
-
         frozen = run_command(
             [uv, "pip", "freeze", "--python", str(python)], capture=True, cwd=repo_root
         )
-        write_freeze(destination, frozen)
-        commit, dirty = source_state(repo_root)
         fingerprint = {
-            FINGERPRINT_SCHEMA_FIELD: FINGERPRINT_SCHEMA,
             "targets": list(resolution.targets),
             "python": _python_version(python),
             "platform": runtime_platform(),
-            "source_commit": commit,
-            "source_dirty": dirty,
             "components": {
-                name: {"manifest_sha256": component.manifest_sha256}
-                for name, component in resolution.components.items()
+                name: {"manifest_sha256": comp.manifest_sha256}
+                for name, comp in resolution.components.items()
             },
             "requirements_sha256": expected_inputs,
             "freeze_sha256": freeze_sha256(frozen),
@@ -524,145 +518,172 @@ def install(
         }
         written = write_fingerprint(destination, fingerprint)
     except BaseException:
-        # The rebuild did not finish, so the environment it replaced is the
-        # only working one at this path; put it back.
-        try:
-            _restore_replaced(destination, replaced)
-        except OSError as exc:
-            print(f"could not restore {destination}: {exc}", file=sys.stderr)
+        if replaced is not None:
+            try:
+                shutil.rmtree(destination, ignore_errors=True)
+                replaced.rename(destination)
+            except OSError as exc:
+                print(f"could not restore {destination}: {exc}", file=sys.stderr)
         raise
-    _discard_replaced(replaced)
+    if replaced is not None:
+        shutil.rmtree(replaced, ignore_errors=True)
     if verbose:
         print(f"installation fingerprint: {written}")
     return fingerprint
 
 
-def index_options(resolution: Resolution) -> list[str]:
-    """Return the uv index options the environment resolves with."""
-    options: list[str] = []
-    if resolution.index_url:
-        options.extend(["--index-url", resolution.index_url])
-    for url in resolution.extra_index_urls:
-        options.extend(["--extra-index-url", url])
-    if resolution.index_strategy:
-        options.extend(["--index-strategy", resolution.index_strategy])
-    return options
-
-
-def _python_version(python: Path) -> str:
+def _run_diag(command: list[str]) -> subprocess.CompletedProcess[str]:
     try:
-        return run_command(
-            [str(python), "-c", "import platform; print(platform.python_version())"],
-            capture=True,
-        ).strip()
-    except InstallError:
-        return "unknown"
+        return subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            timeout=DEFAULT_COMMAND_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise InstallError(
+            f"command timed out after {DEFAULT_COMMAND_TIMEOUT:g}s: {' '.join(command)}"
+        ) from exc
+    except OSError as exc:
+        raise InstallError(f"cannot run {command[0]}: {exc}") from exc
 
 
-#: Role modules a component of each kind may import, relative to its ``probe``
-#: package. Importing the package alone is a weak check: a slice's entry point
-#: stays lazy so a missing optional dependency does not break discovery, and a
-#: package that contains nothing would pass. A probe outside the checkout names
-#: the upstream distribution the component installs and has no roles; ``infra``
-#: components are always of that kind. A tool is either a process with a
-#: ``cli`` or a capability library that a robot slice registers, so only the
-#: roles the component ships are probed. The robot roles name the target slice
-#: skeleton first and the names the pre-migration slices still ship after it.
-ROLE_MODULES = {
-    "robot": ("spec", "config", "adapter", "robot_spec", "env_client"),
-    "sim": ("env_server",),
-    "model": ("server",),
-    "tool": ("cli",),
-}
-
-
-#: The first segment of a probe that names code in this checkout. Any other
-#: probe names an upstream distribution the component installs, and that
-#: distribution does not own the component's role modules.
-CHECKOUT_PROBES = frozenset({"robots", "components"})
-
-
-def _ships(source: Path, role: str) -> bool:
-    """Return whether the component's directory holds ``role``'s module."""
-    return (source / f"{role}.py").is_file() or (source / role).is_dir()
-
-
-def probe_modules(
-    probe: str, kind: str, *, source: Path | None = None
-) -> tuple[str, ...]:
-    """Return the modules an install probe imports, in order.
-
-    ``source`` is the component's directory; with it, only the roles the
-    component ships are imported, because a tool exposes either a CLI or a
-    library of tool modules and no module exists that every tool owns.
-    """
-    if probe.split(".")[0] not in CHECKOUT_PROBES:
-        return (probe,)
-    roles = ROLE_MODULES.get(kind, ())
-    if source is not None:
-        roles = tuple(role for role in roles if _ships(source, role))
-    return (probe, *(f"{probe}.{role}" for role in roles))
-
-
-def probe_source(probe: str, kind: str, *, source: Path | None = None) -> str:
-    """Return the source an install probe runs for a component of ``kind``.
-
-    The probe imports the component's package and the role modules its kind
-    owns, so an environment that installed the package without the component's
-    own code fails here rather than the first time the component is used.
-    """
-    modules = probe_modules(probe, kind, source=source)
-    lines = [f"import {modules[0]}"]
-    if len(modules) > 1:
-        lines.insert(0, "import importlib")
-        lines.extend(f'importlib.import_module("{module}")' for module in modules[1:])
-    return "\n".join(lines) + "\n"
-
-
-def probe_command(
-    python: Path, probe: str, kind: str, *, source: Path | None = None
-) -> list[str]:
-    """Return the command that runs an install probe inside ``python``.
-
-    ``-I`` keeps the caller's environment and working directory out of
-    ``sys.path``, so a probe reports what the environment installed: the
-    editable install of the checkout, not the source tree the command happens
-    to be running in.
-    """
-    return [str(python), "-I", "-c", probe_source(probe, kind, source=source)]
-
-
-def repair_command(resolution: Resolution, *, force: bool = False) -> str:
-    """Return the command that rebuilds the same installation.
-
-    ``force`` replaces the environment at the target path. ``install`` requires
-    it when the recorded component closure differs; ``doctor`` also asks for it
-    when the recorded platform does.
-    """
-    command = f"rpent-install install {' '.join(resolution.targets)}"
-    return f"{command} --force" if force else command
-
-
-def _probe_components(
-    resolution: Resolution,
-    python: Path,
-    *,
-    verbose: bool,
-) -> None:
-    for name, component in resolution.components.items():
-        probe = component.probe
-        if verbose:
-            print(f"probe {name}: import {probe}")
-        try:
-            run_command(
-                probe_command(python, probe, component.kind, source=component.path),
-                capture=True,
+def check_installation(venv: Path, *, root: Path | None = None) -> list[Check]:
+    """Diagnose ``venv`` against its recorded fingerprint and current manifests."""
+    repo_root = (root or get_repo_root()).resolve()
+    venv = Path(venv).resolve()
+    fingerprint = read_fingerprint(venv)
+    if fingerprint is None:
+        return [
+            Check(
+                FAIL,
+                f"{venv} has no {FINGERPRINT_NAME}; install it with "
+                f"`rpent-install install <components> --venv {venv}`",
             )
-        except InstallError as exc:
-            raise InstallError(
-                f"component {name!r} is not importable in {python.parent.parent}\n"
-                f"  probe: import {probe}\n"
-                f"  install: {repair_command(resolution)} "
-                f"--venv {python.parent.parent}\n"
-                f"{exc}"
-            ) from exc
+        ]
+    targets = fingerprint.get("targets")
+    if not isinstance(targets, list) or not targets:
+        return [Check(FAIL, f"fingerprint in {venv} records no target components")]
+
+    checks = [
+        Check(OK, f"targets: {', '.join(targets)}"),
+        Check(OK, f"installed at: {fingerprint.get('installed_at', '?')}"),
+    ]
+    try:
+        catalog = discover(repo_root)
+        resolution = resolve_targets(targets, catalog, root=repo_root)
+    except (InstallError, ValueError) as exc:
+        checks.append(Check(FAIL, f"cannot resolve {' '.join(targets)!r}: {exc}"))
+        return checks
+    if not resolution.ok:
+        checks.append(Check(FAIL, "\n".join(resolution.errors)))
+        return checks
+
+    recorded = recorded_closure(fingerprint)
+    expected_inputs = requirements_sha256(
+        resolution,
+        root=repo_root,
+        core_dependencies=read_core_dependencies(repo_root),
+        planner_dependencies=read_planner_dependencies(repo_root),
+    )
+    if recorded is not None and recorded != closure(resolution.components):
+        checks.append(
+            Check(
+                FAIL,
+                "environment holds a different component set; rerun "
+                f"`{repair_command(resolution, force=True)} --venv {venv}`",
+            )
+        )
+    elif fingerprint.get("requirements_sha256") != expected_inputs:
+        checks.append(
+            Check(
+                FAIL,
+                "environment is out of date with manifests or overrides; rerun "
+                f"`{repair_command(resolution)} --venv {venv}`",
+            )
+        )
+    else:
+        checks.append(Check(OK, "installation inputs unchanged"))
+
+    python = venv_python(venv)
+    if not python.exists():
+        checks.append(Check(FAIL, f"no Python interpreter in {venv}"))
+        return checks
+    recorded_python = str(fingerprint.get("python", ""))
+    unsupported = python_errors(
+        recorded_python, resolution.components.values(), owner=str(venv)
+    )
+    if unsupported:
+        checks.append(Check(FAIL, "\n".join(unsupported)))
+    else:
+        checks.append(Check(OK, f"python: {recorded_python}"))
+
+    current_platform = runtime_platform()
+    recorded_platform = fingerprint.get("platform")
+    if recorded_platform is not None and recorded_platform != current_platform:
+        checks.append(
+            Check(
+                FAIL,
+                f"installed for {recorded_platform}, but this machine is "
+                f"{current_platform}; rerun "
+                f"`{repair_command(resolution, force=True)} --venv {venv}`",
+            )
+        )
+    else:
+        checks.append(Check(OK, f"platform: {current_platform}"))
+
+    try:
+        uv = find_uv()
+    except InstallError as exc:
+        checks.append(Check(WARN, str(exc)))
+        uv = None
+    if uv is not None:
+        frozen = _run_diag([uv, "pip", "freeze", "--python", str(python)])
+        if frozen.returncode != 0:
+            checks.append(Check(FAIL, f"uv pip freeze failed: {frozen.stderr.strip()}"))
+        elif freeze_sha256(frozen.stdout) != fingerprint.get("freeze_sha256"):
+            checks.append(
+                Check(
+                    WARN,
+                    "installed packages differ from recorded freeze (e.g. overlaid "
+                    f"packages); rerun `{repair_command(resolution, force=True)} "
+                    f"--venv {venv}` to reset",
+                )
+            )
+        else:
+            checks.append(Check(OK, "installed package set matches the fingerprint"))
+        checked = _run_diag([uv, "pip", "check", "--python", str(python)])
+        if checked.returncode != 0:
+            detail = (checked.stdout + checked.stderr).strip()
+            checks.append(Check(FAIL, f"uv pip check failed: {detail}"))
+        else:
+            checks.append(Check(OK, "uv pip check"))
+
+    for name, component in resolution.components.items():
+        result = _run_diag(
+            probe_command(
+                python, component.probe, component.kind, source=component.path
+            )
+        )
+        if result.returncode != 0:
+            last = (
+                result.stderr.strip().splitlines()[-1]
+                if result.stderr.strip()
+                else component.probe
+            )
+            checks.append(Check(FAIL, f"component {name!r} is not importable: {last}"))
+        else:
+            checks.append(Check(OK, f"probe {name}: import {component.probe}"))
+    return checks
+
+
+def inspect_installation(venv: Path) -> dict[str, Any] | None:
+    """Return the stored fingerprint with its canonical hash, or ``None``."""
+    fingerprint = read_fingerprint(venv)
+    if fingerprint is None:
+        return None
+    return {
+        "venv": str(Path(venv).resolve()),
+        "sha256": fingerprint_sha256(fingerprint),
+        "fingerprint": fingerprint,
+    }

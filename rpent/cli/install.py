@@ -12,42 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``rpent-install``: inspect, check, install, and diagnose components.
-
-Every environment is described by the components named on the command line::
-
-    rpent-install install robot-alpha --venv .venv-alpha
-    rpent-install install infra-dev --venv .venv-dev
-
-Repository checks and CI selection live under ``tests/tooling/``.
-"""
+"""``rpent-install``: list, check, install, and diagnose component environments."""
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
-from rpent.install.compile import resolve_resolution
-from rpent.install.discovery import discover
-from rpent.install.doctor import FAIL, check_installation, inspect_installation
 from rpent.install.errors import InstallConfigError, InstallError
-from rpent.install.fingerprint import current_venv
-from rpent.install.installer import find_uv, install, resolve_targets
-from rpent.install.requirements import (
+from rpent.install.installer import (
+    FAIL,
+    check_installation,
+    current_venv,
+    find_uv,
+    inspect_installation,
+    install,
+    resolve_targets,
+)
+from rpent.install.manifest import discover
+from rpent.install.resolve import (
+    Resolution,
+    choose_python,
     read_core_dependencies,
     read_planner_dependencies,
+    resolve_resolution,
 )
-from rpent.install.resolve import Resolution, choose_python
 from rpent.utils.config import get_repo_root
 
 
 def _checkout_root(start: Path) -> Path | None:
-    """Return the checkout that contains ``start``, if any.
-
-    A non-editable install resolves this package into site-packages, so the
-    checkout the command runs in is the one whose manifests the user means.
-    """
+    """Return the RPent checkout containing ``start``, if any."""
     for candidate in (start, *start.parents):
         if (candidate / "pyproject.toml").is_file() and (
             (candidate / "components").is_dir() or (candidate / "robots").is_dir()
@@ -68,12 +64,8 @@ def command_list(args: argparse.Namespace) -> int:
     }
     for kind, heading in headings.items():
         components = sorted(
-            (
-                component
-                for component in catalog.components.values()
-                if component.kind == kind
-            ),
-            key=lambda component: component.name,
+            (c for c in catalog.components.values() if c.kind == kind),
+            key=lambda c: c.name,
         )
         if not components:
             continue
@@ -86,13 +78,8 @@ def command_list(args: argparse.Namespace) -> int:
 
 
 def _report_resolution(
-    label: str,
-    resolution: Resolution,
-    *,
-    root: Path,
-    uv: str | None,
+    label: str, resolution: Resolution, *, root: Path, uv: str | None
 ) -> bool:
-    """Print one resolution's verdict and return whether it failed."""
     if not resolution.ok:
         print(f"{label}: FAIL")
         for error in resolution.errors:
@@ -127,16 +114,9 @@ def _report_resolution(
 
 
 def command_check(args: argparse.Namespace) -> int:
-    """Resolve component environments without installing anything.
-
-    Several components on one command line describe the single environment
-    ``install`` would create from them; ``--all`` checks every component's own
-    environment.
-    """
+    """Validate component manifests and resolutions without installing."""
     catalog = discover(args.root)
     if args.all and args.targets:
-        # ``--all`` checks every component on its own, so named components
-        # would be dropped silently, including one whose name is a typo.
         print(
             "--all checks every component; do not name components with it",
             file=sys.stderr,
@@ -155,51 +135,52 @@ def command_check(args: argparse.Namespace) -> int:
     failed = bool(unknown)
     uv = find_uv() if args.resolve else None
     targets = [name for name in names if name in catalog.components]
-    common = {"root": args.root, "uv": uv}
-
-    def resolve_names(names: list[str]) -> Resolution:
-        return resolve_targets(names, catalog, root=args.root)
 
     if len(targets) > 1 and not args.all:
-        # Naming several components on one command line asks for the
-        # environment ``install`` would create from them, so they resolve
-        # together: components that each resolve alone may still refuse to
-        # share an environment. ``--all`` keeps asking about each component's
-        # own environment, which is also the unit the CI matrix installs.
-        resolution = resolve_names(targets)
-        failed |= _report_resolution(" ".join(targets), resolution, **common)
+        resolution = resolve_targets(targets, catalog, root=args.root)
+        failed |= _report_resolution(
+            " ".join(targets), resolution, root=args.root, uv=uv
+        )
         if not resolution.ok:
-            # Attribute the failure to the manifests that need changing.
             for name in targets:
-                failed |= _report_resolution(name, resolve_names([name]), **common)
+                failed |= _report_resolution(
+                    name,
+                    resolve_targets([name], catalog, root=args.root),
+                    root=args.root,
+                    uv=uv,
+                )
         return 1 if failed else 0
 
     for name in targets:
-        failed |= _report_resolution(name, resolve_names([name]), **common)
+        failed |= _report_resolution(
+            name,
+            resolve_targets([name], catalog, root=args.root),
+            root=args.root,
+            uv=uv,
+        )
     return 1 if failed else 0
 
 
 def command_install(args: argparse.Namespace) -> int:
-    """Create or reuse a virtualenv and install the named components."""
+    """Create or update a virtualenv for the named components."""
     install(
         args.targets,
         root=args.root,
         venv=args.venv,
         dry_run=args.dry_run,
         force=args.force,
+        index_url=args.index_url,
+        torch_backend=args.torch_backend,
         verbose=True,
     )
     return 0
 
 
 def command_doctor(args: argparse.Namespace) -> int:
-    """Check the current or selected virtualenv."""
+    """Diagnose the active or selected virtualenv."""
     venv = args.venv or current_venv()
     if venv is None:
-        print(
-            "no active virtualenv; activate one or pass --venv",
-            file=sys.stderr,
-        )
+        print("no active virtualenv; activate one or pass --venv", file=sys.stderr)
         return 2
     if args.fingerprint:
         report = inspect_installation(venv)
@@ -233,73 +214,56 @@ def build_parser() -> argparse.ArgumentParser:
         "--root",
         type=Path,
         default=None,
-        help=(
-            "RPent checkout to read manifests from; defaults to the one "
-            "containing the current directory, or this checkout."
-        ),
+        help="RPent checkout containing component manifests.",
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    listing = subcommands.add_parser("list", help="list components")
+    listing = subcommands.add_parser("list", help="list available components")
     listing.set_defaults(handler=command_list)
 
-    check = subcommands.add_parser(
-        "check",
-        help="check environments without installing",
-        description=(
-            "Named components are checked as the one environment `install` "
-            "would create from them; --all checks each component's own "
-            "environment instead."
-        ),
-    )
+    check = subcommands.add_parser("check", help="check components without installing")
+    check.add_argument("targets", nargs="*", metavar="COMPONENT")
     check.add_argument(
-        "targets",
-        nargs="*",
-        metavar="COMPONENT",
-        help="components that form one environment",
-    )
-    check.add_argument(
-        "--all",
-        action="store_true",
-        help="check every component in an environment of its own",
+        "--all", action="store_true", help="check every component individually"
     )
     check.add_argument(
         "--resolve",
         action="store_true",
-        help="also compile each environment with uv to prove it resolves",
+        help="also verify dependency resolution with uv",
     )
     check.set_defaults(handler=command_check)
 
     installer = subcommands.add_parser(
-        "install",
-        help="install one or more components and their requirements into a virtualenv",
+        "install", help="install components and their requirements into a virtualenv"
     )
+    installer.add_argument("targets", nargs="+", metavar="COMPONENT")
+    installer.add_argument("--venv", type=Path, help="target virtualenv path")
     installer.add_argument(
-        "targets",
-        nargs="+",
-        metavar="COMPONENT",
-        help="component names; the environment also contains their closure",
-    )
-    installer.add_argument("--venv", type=Path, help="virtualenv path")
-    installer.add_argument(
-        "--dry-run", action="store_true", help="print requirements only"
+        "--dry-run", action="store_true", help="print generated requirements only"
     )
     installer.add_argument(
         "--force",
         action="store_true",
-        help=(
-            "replace the virtualenv at --venv when it holds other components "
-            "or was not created by rpent-install"
-        ),
+        help="recreate an existing virtualenv at --venv",
+    )
+    installer.add_argument(
+        "--index-url",
+        default=None,
+        help="override the primary Python package index URL (e.g. a PyPI mirror)",
+    )
+    installer.add_argument(
+        "--torch-backend",
+        default=None,
+        help="set UV_TORCH_BACKEND (e.g. auto, cpu, cu124, cu126, cu128)",
     )
     installer.set_defaults(handler=command_install)
 
-    doctor = subcommands.add_parser("doctor", help="diagnose an installed venv")
+    doctor = subcommands.add_parser("doctor", help="diagnose an installed virtualenv")
     doctor.add_argument("--venv", type=Path)
     doctor.add_argument(
         "--fingerprint",
         action="store_true",
-        help="print the stored installation fingerprint instead of checking",
+        help="print the stored installation fingerprint",
     )
     doctor.set_defaults(handler=command_doctor)
     return parser
@@ -310,16 +274,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.root is None:
-        args.root = _checkout_root(Path.cwd()) or get_repo_root()
-    # A wheel install puts this package in site-packages, where none of the
-    # manifests the installer reads exist. Say so instead of failing on a
-    # path the user never named. The root has to be judged like the default
-    # candidate: a bare ``pyproject.toml`` also marks any other Python project.
+        default_root = os.environ.get("RPENT_DEFAULT_ROOT")
+        args.root = (
+            _checkout_root(Path.cwd())
+            or (Path(default_root) if default_root else None)
+            or get_repo_root()
+        )
+    args.root = args.root.resolve()
     if _checkout_root(args.root) != args.root:
         parser.error(
-            f"{args.root} is not an RPent checkout; rpent-install reads "
-            "component manifests from a source checkout. Run it from one, or "
-            "pass --root pointing at one"
+            f"{args.root} is not an RPent checkout; run from a checkout or pass --root"
         )
     try:
         return args.handler(args)

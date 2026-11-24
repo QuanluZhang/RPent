@@ -29,9 +29,8 @@ with documentation instead of assuming either is correct.
   for an environment without owning code; the directory holds only the manifest.
 - `rpent-install.sh`: the checkout-level bootstrap for the installer; a fresh
   checkout has no `rpent-install` console script yet.
-- `tests/`: offline tests, integration checks, repository structure checks, and
-  the selection of test environments for a change under `tests/tooling/`; see
-  [tests/README.md](tests/README.md).
+- `tests/`: offline tests, integration checks, and repository layout checks
+  under `tests/tooling/`; see [tests/README.md](tests/README.md).
 - `docs/source-en/` and `docs/source-zh/`: paired user and developer documentation.
 
 The dependency direction is `rpent` ← `components/sim` ← `components/models` ←

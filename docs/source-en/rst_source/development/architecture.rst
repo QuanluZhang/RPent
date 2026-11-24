@@ -87,6 +87,7 @@ model services do not import each other.
      libero/
      robocasa/
      robotwin/
+     robolab/
      franka/
      dual_franka/
      robodojo/
@@ -99,7 +100,7 @@ model services do not import each other.
      infra/          # Infrastructure components: a manifest and no code
    rpent-install.sh  # Bootstrap the installer from a fresh checkout
    tests/
-     tooling/        # Repository checks and CI selection
+     tooling/        # Repository layout and import-boundary checks
 
 Environment Discovery
 ---------------------

@@ -75,8 +75,7 @@ pre-commit install
   如果行为发生变化，请同步更新测试并说明原因。单测必须能在普通 CPU 机器上离线
   跑通；需要模型或服务输出时使用 fake。安装器单测放在
   `tests/unit_tests/rpent/install/`，使用合成清单；针对仓库内 `component.toml`、
-  组件清单和依赖清单的跨文件契约放在 `tests/unit_tests/installs/`。仓库结构检查与
-  「改动需要跑哪些测试环境」的选路逻辑放在 `tests/tooling/`，测试与它们放在一起。
+  组件清单和依赖清单的跨文件契约放在 `tests/unit_tests/installs/`。仓库结构与导入边界检查放在 `tests/tooling/`，对应单测放在 `tests/unit_tests/tooling/`。
 - **遵循项目代码风格。** pre-commit 负责 Ruff 格式化和 lint。公共 Python API 应有
   类型标注和 Google 风格 docstring，运行时信息应使用项目 logger，而不是 `print`。
 

@@ -54,6 +54,7 @@ def main() -> int:
 
         return cli.main()
     try:
+        require("tool-flywheel", "lerobot")
         cli = require("tool-flywheel", "components.tools.flywheel.cli")
     except MissingComponentError as exc:
         print(exc, file=sys.stderr)

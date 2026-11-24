@@ -53,8 +53,7 @@ i2rt SDK and the required build dependencies:
 **Inference machine installation**
 
 On the inference machine, use RLinf's installer to install YAM and OpenPI
-dependencies into ``.venv-yam-real``, then add the ``robot-yam`` component to
-the same environment:
+dependencies into ``.venv-yam-real``, then install RPent into that environment:
 
 .. code-block:: bash
 
@@ -63,7 +62,7 @@ the same environment:
      --venv /path/to/RPent/.venv-yam-real --install-rlinf
    cd /path/to/RPent
    source .venv-yam-real/bin/activate
-   ./rpent-install.sh install robot-yam --venv .venv-yam-real
+   uv pip install --python .venv-yam-real/bin/python -e /path/to/RPent
    uv pip check
 
 If system dependencies are already installed, append ``--no-root`` to the installer

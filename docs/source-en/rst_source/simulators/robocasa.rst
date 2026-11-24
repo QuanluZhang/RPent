@@ -516,7 +516,8 @@ Expand the details below for task names, evaluation settings and score reference
    The current evaluation uses task-specific and global memory together.
    ``target50.json`` uses protocol ``robocasa-harness-vla-v2`` and
    result schema ``1.1``, with GPT-5.5 as the reference configuration. Installation
-   dependencies come from ``pyproject.toml``. For custom tasks, seeds or planner
+   dependencies are declared in the RoboCasa component manifests (``robot-robocasa``,
+   ``sim-robocasa``, ``model-rldx``). For custom tasks, seeds or planner
    settings, pass a manifest using the current protocol:
 
    .. code-block:: bash
@@ -525,8 +526,8 @@ Expand the details below for task names, evaluation settings and score reference
          --manifest /path/to/manifest.json
 
    For comparisons, keep a copy of the memory and record its HF commit or file
-   hashes locally, alongside the resolved commits of source dependencies on their
-   ``rpent`` branches. Memory is not version-pinned; the validator does not compare
+   hashes locally, alongside the pinned commits in the component manifests.
+   Memory is not version-pinned; the validator does not compare
    its contents across runs.
 
 .. dropdown:: Published Target50 Scores
@@ -637,11 +638,11 @@ Startup and Inference
 ~~~~~~~~~~~~~~~~~~~~~
 
 - **Missing RLDX interfaces in an old environment:** rerun
-  ``rpent-install install robot-robocasa``, then reinstall ``rlinf-rldx`` in the
+  ``rpent-install install robot-robocasa --venv .venv-robocasa``, then reinstall ``rlinf-rldx`` in the
   environment. Older PyPI wheels can lack required interfaces even with the same
   version number.
 - **Missing navigation camera:** if the error names ``mobilebase0_navview``,
-  rerun ``rpent-install install robot-robocasa`` to update Robosuite rather than
+  rerun ``rpent-install install robot-robocasa --venv .venv-robocasa`` to update Robosuite rather than
   patching XML.
 - **Directory permission errors:** use the source dependencies installed by
   ``sim-robocasa``; XML conversion should write temporary files. Set

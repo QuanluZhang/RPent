@@ -98,48 +98,29 @@ Installation and Resources
 
 For a first LIBERO-PRO run, complete the installation, asset downloads, and model setup in :doc:`../get_started/quickstart`. Continue here to select tasks and reproduce experiments.
 
-``robot-libero`` installs the standard LIBERO and LIBERO-PRO packages together;
-choose the variant at runtime with ``--libero-type`` and download the matching
-assets:
+``robot-libero`` installs the standard LIBERO and LIBERO-PRO packages together.
+For LIBERO-plus (which requires ``robosuite<1.5``), install ``robot-libero_plus``
+in its own virtual environment. Choose the variant at runtime with
+``--libero-type`` and download the matching assets:
 
 .. list-table::
    :header-rows: 1
 
    * - ``--libero-type``
+     - Install
      - Assets
    * - ``standard``
+     - ``./rpent-install.sh install robot-libero --venv .venv-libero``
      - ``libero-download-assets --skip-existing``
    * - ``pro``
+     - ``./rpent-install.sh install robot-libero --venv .venv-libero``
      - ``liberopro-download-assets --skip-existing``
    * - ``plus``
-     - ``liberoplus-download-assets --skip-existing``; the simulator package
-       comes from ``sim-libero_plus``
+     - ``./rpent-install.sh install robot-libero_plus --venv .venv-libero-plus``
+     - ``liberoplus-download-assets --skip-existing``
 
-LIBERO-plus needs robosuite<1.5, so it cannot share an environment with the
-standard and PRO packages, and ``sim-libero`` is a requirement of
-``robot-libero``. Run a plus task from two environments: install
-``robot-libero`` as usual for the robot, install the plus packages in a second
-environment, and start its environment service with ``LIBERO_TYPE=plus``:
-
-.. code-block:: bash
-
-   rpent-install install sim-libero_plus --venv .venv-libero-plus
-   LIBERO_TYPE=plus .venv-libero-plus/bin/python \
-     -m components.sim.libero.env_server --suite libero_object --task 0 --seed 0 \
-     --max-episode-steps 10000 --transport http --host 0.0.0.0 --port ENV_PORT
-
-Run the task from the ``robot-libero`` environment and point it at that
-service; the suite, task, seed, and episode budget must match:
-
-.. code-block:: bash
-
-   rpent --robot libero --suite libero_object --task 0 --seed 0 \
-     --max-episode-steps 10000 --libero-type plus \
-     --env-endpoint ENV_HOST:ENV_PORT --planner claude_code
-
-The standard and PRO environment includes Pi0.5 (``rpent-openpi``), SAM3, and
-the RLinf runtime (``infra-rlinf``), which ``sim-libero_plus`` requires.
-Download model weights separately as described below.
+Each environment includes Pi0.5 (``rpent-openpi``), SAM3, and the RLinf runtime
+(``infra-rlinf``). Download model weights separately as described below.
 
 At runtime, set ``--libero-type`` to match the installed variant.
 

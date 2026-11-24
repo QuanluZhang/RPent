@@ -1,0 +1,93 @@
+name: Unit tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  static:
+    name: Layout, manifests, and minimal imports
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Check repository layout
+        run: ./tests/tooling/run.sh layout
+      - name: Check component manifests
+        run: ./rpent-install.sh check --all
+      - name: Check minimal environment imports
+        run: |
+          uv python install 3.11
+          ./rpent-install.sh install infra-minimal --venv .venv-minimal
+          .venv-minimal/bin/python -c "
+          import rpent
+          from rpent.robots import enumerate_robots
+          robots = enumerate_robots()
+          assert robots, 'robot discovery returned no entries'
+          print(rpent.__version__, sorted(robots))
+          "
+          .venv-minimal/bin/rpent --help >/dev/null
+          .venv-minimal/bin/rpent-install list >/dev/null
+          ./rpent-install.sh doctor --venv .venv-minimal
+
+  test:
+    name: Unit tests (${{ matrix.python-version }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Create environment for Python ${{ matrix.python-version }}
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv venv --python ${{ matrix.python-version }} .venv
+      - name: Install unit test environment
+        run: ./rpent-install.sh install infra-unit_cpu --venv .venv
+      - name: Run unit tests with coverage
+        run: |
+          .venv/bin/python -m coverage run --source=rpent,robots,components \
+            -m pytest tests/unit_tests -v
+          .venv/bin/python -m coverage report -m
+
+  package:
+    name: Package
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    uses: ./.github/workflows/package.yml
+
+  # Single stable status check for branch rulesets.
+  unittest:
+    name: unittest
+    if: always()
+    needs: [static, test, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all checks to pass
+        run: |
+          failed=0
+          for result in 'static:${{ needs.static.result }}' \
+                        'test:${{ needs.test.result }}' \
+                        'package:${{ needs.package.result }}'; do
+            echo "check result: $result"
+            case "${result#*:}" in
+              success|skipped) ;;
+              *) echo "::error::$result did not succeed"; failed=1 ;;
+            esac
+          done
+          exit "$failed"

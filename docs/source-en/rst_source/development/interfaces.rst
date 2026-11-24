@@ -8,8 +8,7 @@ Robot Entry
 -----------
 
 After you add ``robots/<robot>/``, the package ``__init__.py`` re-exports two
-functions implemented in ``spec.py`` (``robot_spec.py`` until the a_5 rename)
-for ``main.py`` to call:
+functions implemented in ``robot_spec.py`` for ``main.py`` to call:
 
 .. code-block:: python
 
@@ -101,13 +100,6 @@ docstrings provide parameter schemas and descriptions; ``@tool(readonly=True)``
 allows concurrent readonly calls and skips post-action state capture. Handlers return ``ToolResult(data=..., images=...)``:
 ``data`` holds the JSON payload, including ``error`` or ``_finish`` when needed,
 and ``images`` holds PNG bytes.
-
-``call_ok`` and ``no_execution`` describe the call rather than the payload. The
-framework sets them when it rejects a call — an unknown tool, arguments the
-schema rejected, or a cancellation — and ``to_dict()`` then publishes
-``call_ok: false``, plus ``no_execution: true`` when the tool never ran and so
-changed no environment state. A tool that ran and reported ``error`` in its
-payload keeps ``call_ok`` true.
 
 The base class registers common file tools when a memory manager is provided; call ``super().__init__()`` then
 ``add_tool`` for robot tools. Per-step state and ``view_env_state`` are in

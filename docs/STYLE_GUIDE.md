@@ -43,7 +43,7 @@ version-specific changes in release or migration notes.
 
 Keep the same sections and ordering in both languages:
 
-1. **Get Started / 开始使用**: Introduction to RPent and Quick Start.
+1. **Get Started / 开始使用**: Introduction to RPent, Installation, and Quick Start.
 2. **Leaderboard / 排行榜**: the existing performance and time/token pages.
 3. **Real-World Demos / 真实世界演示**: direct robot demo pages, each linking to
    the corresponding installation and usage guide.
@@ -76,8 +76,9 @@ Use non-clickable group captions with consistent spacing in the sidebar.
 When moving a page, update internal links and add an old-to-new URL mapping
 in both `conf.py` files. Keep the same relative page paths in both languages.
 
-The home page is a short introduction with task-oriented links. Installation
-and the first LIBERO-PRO task form one Quick Start. Keep reproduction inside
+The home page is a short introduction with task-oriented links. `Installation`
+covers `rpent-install` component environments and diagnostics, while `Quick Start`
+walks through the first complete LIBERO-PRO run. Keep reproduction inside
 each environment page; logs, success criteria, and common failures belong
 next to the procedure they explain. Keep the leaderboard's published data and
 two-page organization intact when reorganizing prose.
@@ -114,9 +115,9 @@ are separate from documentation content requirements.
 
 Use this sequence: requirements, installation, assets and checkpoints, planner
 connection check, one task, expected artifacts and success criterion, common
-failures. Keep runtime option tables in Command-Line Reference. Put installation
-commands in the environment or feature guide that uses them; do not maintain
-a separate installation summary table.
+failures. Keep runtime option tables in Command-Line Reference. Put platform-specific
+post-install steps in the environment or feature guide that uses them, and link to
+the shared `Installation` page for `rpent-install` usage and component discovery.
 
 ### Simulator guides
 

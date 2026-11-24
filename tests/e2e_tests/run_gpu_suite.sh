@@ -59,6 +59,8 @@ if [[ ! "$pytest_timeout" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 mkdir -p "$output_dir" "$venv_root"
+output_dir=$(cd "$output_dir" && pwd)
+venv_root=$(cd "$venv_root" && pwd)
 
 cleanup() {
   if [[ -d "$venv_root" ]]; then

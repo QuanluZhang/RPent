@@ -43,10 +43,9 @@ component's `dependencies` with lazy imports.
    failure and cleanup; handle complete CLI startup and selected Dashboard
    components when supported. Keep robot-specific result schemas in the
    robot's finalization hook and verify which entry points call it.
-6. Update the component manifest, its entry in `tests/tooling/matrix.py`,
-   usage/development documentation, and tests. Follow the actual runner and CI configuration
-   when adding a new supported test target; adding a directory alone does not
-   wire it into CI.
+6. Update the component manifest, usage/development documentation, and tests.
+   Follow the actual runner and CI configuration when adding a new supported
+   test target; adding a directory alone does not wire it into CI.
 
 ## Validate and hand off
 

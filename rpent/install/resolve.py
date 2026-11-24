@@ -12,38 +12,41 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Resolve component names into one environment's contents and diagnostics."""
+"""Resolve components into one environment's requirements and check compatibility."""
 
 from __future__ import annotations
 
+import hashlib
+import json
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from rpent.install.discovery import Catalog
-from rpent.install.manifest import Component
+from rpent.install.errors import InstallConfigError
+from rpent.install.manifest import DEFAULT_MANYLINUX, Catalog, Component
 
 if TYPE_CHECKING:
     from packaging.specifiers import SpecifierSet
 
-# ``packaging`` parses requirement strings and is imported where that happens,
-# not at module import. The repository tooling (``tests.tooling.matrix``)
-# imports manifest discovery through ``rpent.install`` and must run in a
-# checkout that has no third-party packages installed; every install path still
-# needs packaging.
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    import tomli as tomllib
+
+#: Python minors RPent supports, newest first; mirrors ``requires-python``.
+SUPPORTED_PYTHONS = ("3.12", "3.11", "3.10")
+PLATFORM_TAG = "x86_64-manylinux_{baseline}"
 
 
 @dataclass
 class Resolution:
-    """The components one environment contains, and why it cannot be built."""
+    """Resolved component closure, merged index settings, and static errors."""
 
-    #: The component names the caller asked for, sorted and deduplicated.
     targets: tuple[str, ...]
-    #: Every component in the environment, including the ``requires`` closure.
     components: dict[str, Component] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
-    #: Index settings merged from the components; parts of the closure that
-    #: disagree are errors.
     index_url: str | None = None
     extra_index_urls: tuple[str, ...] = ()
     index_strategy: str | None = None
@@ -59,13 +62,65 @@ class Resolution:
         return any(component.planner for component in self.components.values())
 
     def dependencies(self) -> tuple[str, ...]:
-        """Return every direct dependency in the environment, deduplicated."""
-        requirements = [
-            requirement
-            for component in self.components.values()
-            for requirement in component.dependencies
-        ]
-        return tuple(dict.fromkeys(requirements))
+        """Return every direct dependency in the closure, deduplicated."""
+        return tuple(
+            dict.fromkeys(
+                requirement
+                for component in self.components.values()
+                for requirement in component.dependencies
+            )
+        )
+
+
+def _read_pyproject(root: Path) -> dict[str, Any]:
+    path = root / "pyproject.toml"
+    try:
+        with path.open("rb") as file:
+            return tomllib.load(file)
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise InstallConfigError(f"{path}: cannot read pyproject.toml: {exc}") from exc
+
+
+def _dependency_strings(value: Any, path: Path, key: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise InstallConfigError(f"{path}: {key} must be a list of requirement strings")
+    return tuple(value)
+
+
+def read_core_dependencies(root: Path) -> tuple[str, ...]:
+    """Return ``[project].dependencies`` from ``pyproject.toml``."""
+    project = _read_pyproject(root).get("project")
+    if not isinstance(project, dict):
+        raise InstallConfigError(f"{root / 'pyproject.toml'}: missing [project] table")
+    return _dependency_strings(
+        project.get("dependencies"), root / "pyproject.toml", "[project].dependencies"
+    )
+
+
+def read_planner_dependencies(root: Path) -> tuple[str, ...]:
+    """Return ``[project.optional-dependencies].planner``, or ``()``."""
+    project = _read_pyproject(root).get("project")
+    if not isinstance(project, dict):
+        raise InstallConfigError(f"{root / 'pyproject.toml'}: missing [project] table")
+    optional = project.get("optional-dependencies")
+    planner = optional.get("planner") if isinstance(optional, dict) else None
+    if planner is None:
+        return ()
+    return _dependency_strings(
+        planner, root / "pyproject.toml", "[project.optional-dependencies].planner"
+    )
+
+
+def read_uv_settings(root: Path) -> dict[str, Any]:
+    """Return ``[tool.uv]`` from ``pyproject.toml``, or ``{}``."""
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return {}
+    tool = _read_pyproject(root).get("tool")
+    settings = tool.get("uv") if isinstance(tool, dict) else None
+    return dict(settings) if isinstance(settings, dict) else {}
 
 
 def _canonical(value: str) -> tuple[str, SpecifierSet, str] | None:
@@ -77,158 +132,100 @@ def _canonical(value: str) -> tuple[str, SpecifierSet, str] | None:
     except InvalidRequirement:
         return None
     if requirement.marker is not None:
-        # Marker-scoped pins select different wheels per interpreter/platform
-        # (for example per-version pxd wheels); the resolver decides which one
-        # applies, so they are not contradictory declarations.
         return None
-    url = str(requirement.url) if requirement.url else ""
     return (
         canonicalize_name(requirement.name),
         requirement.specifier,
-        url,
+        str(requirement.url) if requirement.url else "",
     )
-
-
-def _owner_pin(value: str) -> tuple[str, str] | None:
-    """Return ``(package, pin)`` for an exact pin or a URL requirement.
-
-    Ranges and unpinned requirements compose, so they are not owners: whether
-    they resolve together is uv's decision (``rpent-install check --resolve``).
-    """
-    identity = _canonical(value)
-    if identity is None:
-        return None
-    package, specifier, url = identity
-    if url:
-        return package, url
-    if len(specifier) != 1:
-        return None
-    item = next(iter(specifier))
-    if item.operator not in {"==", "==="} or item.version.endswith(".*"):
-        return None
-    return package, f"{item.operator}{item.version}"
 
 
 def _pin_conflicts(
     requirements: list[tuple[str, str]],
 ) -> dict[str, list[tuple[str, str]]]:
-    """Return package -> [(component, pin)] when exact pins disagree.
-
-    Sampling version boundaries to test range overlap reported false conflicts
-    at post-release and pre-release edges (``>1.0`` vs ``<1.0.1`` is satisfied
-    by ``1.0.post1``), so this check stays syntactic: two different exact pins
-    or URLs for one package in one environment, and no more.
-    """
+    """Return ``package -> [(owner, pin)]`` when exact pins or URLs disagree."""
     pins: dict[str, list[tuple[str, str]]] = {}
-    for component_name, value in requirements:
-        owner = _owner_pin(value)
-        if owner is None:
+    for owner, value in requirements:
+        identity = _canonical(value)
+        if identity is None:
             continue
-        package, pin = owner
-        pins.setdefault(package, []).append((component_name, pin))
-    conflicts: dict[str, list[tuple[str, str]]] = {}
-    for package, entries in sorted(pins.items()):
-        if len({pin for _, pin in entries}) < 2:
+        package, specifier, url = identity
+        if url:
+            pin = url
+        elif len(specifier) == 1:
+            item = next(iter(specifier))
+            if item.operator not in {"==", "==="} or item.version.endswith(".*"):
+                continue
+            pin = f"{item.operator}{item.version}"
+        else:
             continue
-        conflicts[package] = sorted(set(entries))
-    return conflicts
-
-
-def _dependency_pins(component: Component) -> dict[str, str]:
-    """Return package -> pin for one component's direct requirements."""
-    identities = (_canonical(value) for value in component.dependencies)
+        pins.setdefault(package, []).append((owner, pin))
     return {
-        identity[0]: str(identity[1]) or identity[2]
-        for identity in identities
-        if identity is not None
+        package: sorted(set(entries))
+        for package, entries in sorted(pins.items())
+        if len({pin for _, pin in entries}) > 1
     }
 
 
-def _format_conflict(left: Component, right: Component) -> str:
-    left_deps = _dependency_pins(left)
-    right_deps = _dependency_pins(right)
-    details = [
-        f"  {left.name}: {package} {left_deps[package]}"
-        f" / {right.name}: {package} {right_deps[package]}"
-        for package in sorted(set(left_deps) & set(right_deps))
-        if left_deps[package] != right_deps[package]
-    ]
-    if not details:
-        details = [
-            f"  {left.name} and {right.name} declare env_conflicts"
-            " (a transitive version incompatibility)"
-        ]
-    return (
-        f"components {left.name!r} and {right.name!r} cannot share an "
-        "environment\n"
-        + "\n".join(details)
-        + "\ninstall each target in its own environment: "
-        f"`rpent-install install {left.name}` and "
-        f"`rpent-install install {right.name}`"
-    )
-
-
-def _override_packages(component: Component) -> set[str]:
-    """Return the packages one component's override files constrain.
-
-    Marker-scoped lines select different constraints per target, so the
-    resolver decides which one applies and they are not compared, the same rule
-    the pin check follows. An unreadable or unparsable file is left to uv,
-    which reports it when it applies the override.
-    """
+def _override_conflicts(components: dict[str, Component]) -> list[str]:
+    """Report packages constrained by override files from multiple components."""
     from packaging.requirements import InvalidRequirement, Requirement
     from packaging.utils import canonicalize_name
 
-    packages: set[str] = set()
-    for path in component.overrides:
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        for line in text.splitlines():
-            value = line.strip()
-            if not value or value.startswith("#"):
-                continue
-            try:
-                requirement = Requirement(value)
-            except InvalidRequirement:
-                continue
-            if requirement.marker is None:
-                packages.add(canonicalize_name(requirement.name))
-    return packages
-
-
-def _override_conflicts(components: dict[str, Component]) -> list[str]:
-    """Return errors for packages two components override at once.
-
-    uv merges every component's override into one resolution, so two files
-    constraining the same package leave the winner to file order. Report the
-    pair and let the components own their constraints or share one file.
-    """
     owners: dict[str, list[str]] = {}
     for name, component in sorted(components.items()):
-        for package in _override_packages(component):
+        packages: set[str] = set()
+        for path in component.overrides:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line in text.splitlines():
+                value = line.strip()
+                if not value or value.startswith("#"):
+                    continue
+                try:
+                    req = Requirement(value)
+                except InvalidRequirement:
+                    continue
+                if req.marker is None:
+                    packages.add(canonicalize_name(req.name))
+        for package in packages:
             owners.setdefault(package, []).append(name)
-    errors: list[str] = []
-    for package, names in sorted(owners.items()):
-        if len(names) < 2:
+    return [
+        f"components {', '.join(repr(name) for name in names)} both override "
+        f"{package!r} in one environment"
+        for package, names in sorted(owners.items())
+        if len(names) > 1
+    ]
+
+
+def _minor_candidates(minor: str, components: Iterable[Component]) -> list[str]:
+    """Return candidate versions within ``minor`` to handle patch-level bounds."""
+    from packaging.specifiers import InvalidSpecifier, SpecifierSet
+    from packaging.version import InvalidVersion, Version
+
+    candidates = [f"{minor}.0", f"{minor}.99"]
+    minor_tuple = tuple(int(part) for part in minor.split("."))
+    for component in components:
+        if not component.python:
             continue
-        errors.append(
-            f"components {', '.join(repr(name) for name in names)} both override "
-            f"{package!r} in one environment; move the constraint into the "
-            "component that needs it or merge the override files"
-        )
-    return errors
+        try:
+            specifier = SpecifierSet(component.python)
+        except InvalidSpecifier:
+            continue
+        for item in specifier:
+            try:
+                ver = Version(item.version.rstrip(".*"))
+            except InvalidVersion:
+                continue
+            if (ver.major, ver.minor) == minor_tuple:
+                candidates.append(str(ver))
+                candidates.append(f"{ver.major}.{ver.minor}.{ver.micro + 1}")
+    return list(dict.fromkeys(candidates))
 
 
-#: The Python minors RPent supports, newest first. It mirrors
-#: ``requires-python`` in the root ``pyproject.toml``: the interpreter is chosen
-#: from the manifests, never from the shell that happens to run the installer,
-#: so the same checkout produces the same environment on every machine.
-SUPPORTED_PYTHONS = ("3.12", "3.11", "3.10")
-
-
-def _supports_python(component: Component, version: str) -> bool:
+def _supports_version(component: Component, version: str) -> bool:
     from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
     if component.python is None:
@@ -236,22 +233,20 @@ def _supports_python(component: Component, version: str) -> bool:
     try:
         supported = SpecifierSet(component.python)
     except InvalidSpecifier:
-        # ``python_errors`` reports the invalid range with its manifest.
         return True
     return supported.contains(version, prereleases=True)
 
 
 def choose_python(components: Iterable[Component]) -> str:
-    """Return the newest supported interpreter every component accepts.
-
-    A component with no common version is reported by ``python_errors`` before
-    the environment is created; the newest supported minor is returned here so
-    the error names a version rather than a failed lookup.
-    """
-    components = list(components)
-    for version in SUPPORTED_PYTHONS:
-        if all(_supports_python(component, version) for component in components):
-            return version
+    """Return the newest supported Python minor (or patch) every component accepts."""
+    items = list(components)
+    for minor in SUPPORTED_PYTHONS:
+        if all(_supports_version(component, minor) for component in items):
+            return minor
+        # Handle patch-level bounds such as ``>=3.11.4,<3.12``.
+        for candidate in _minor_candidates(minor, items):
+            if all(_supports_version(component, candidate) for component in items):
+                return minor
     return SUPPORTED_PYTHONS[0]
 
 
@@ -261,14 +256,14 @@ def python_errors(
     *,
     owner: str = "this environment",
 ) -> list[str]:
-    """Return errors for components that do not support Python ``version``."""
+    """Return errors for components incompatible with Python ``version``."""
     from packaging.specifiers import InvalidSpecifier, SpecifierSet
     from packaging.version import InvalidVersion, Version
 
     try:
         parsed = Version(version)
     except InvalidVersion:
-        return []
+        return [f"invalid or unknown Python version {version!r} for {owner}"]
     errors: list[str] = []
     for component in sorted(components, key=lambda item: item.name):
         if component.python is None:
@@ -282,6 +277,13 @@ def python_errors(
             )
             continue
         if not supported.contains(parsed, prereleases=True):
+            # When checking a bare minor such as "3.11" (before venv creation),
+            # accept if a patch version within that minor satisfies the range.
+            if len(parsed.release) == 2 and any(
+                supported.contains(candidate, prereleases=True)
+                for candidate in _minor_candidates(version, [component])
+            ):
+                continue
             errors.append(
                 f"component {component.name!r} requires Python "
                 f"{component.python}, but {owner} uses {version}"
@@ -292,25 +294,23 @@ def python_errors(
 def _merge_index_settings(
     resolution: Resolution, components: Iterable[Component]
 ) -> None:
-    """Merge index settings, reporting components that disagree."""
+    """Merge index settings across the closure; union ``extra-index-urls``."""
     extra: list[str] = []
     for component in sorted(components, key=lambda item: item.name):
         if component.index_url is not None:
             if resolution.index_url not in (None, component.index_url):
                 resolution.errors.append(
                     f"component {component.name!r} selects index "
-                    f"{component.index_url!r}, but another component in this "
-                    f"environment selects {resolution.index_url!r}; install them "
-                    "in separate environments"
+                    f"{component.index_url!r}, but another component selects "
+                    f"{resolution.index_url!r}; install them in separate environments"
                 )
             resolution.index_url = component.index_url
         if component.index_strategy is not None:
             if resolution.index_strategy not in (None, component.index_strategy):
                 resolution.errors.append(
                     f"component {component.name!r} selects index strategy "
-                    f"{component.index_strategy!r}, but another component in this "
-                    f"environment selects {resolution.index_strategy!r}; install "
-                    "them in separate environments"
+                    f"{component.index_strategy!r}, but another component selects "
+                    f"{resolution.index_strategy!r}; install them in separate environments"
                 )
             resolution.index_strategy = component.index_strategy
         extra.extend(component.extra_index_urls)
@@ -325,32 +325,27 @@ def resolve(
     planner_dependencies: tuple[str, ...] = (),
     python: str | None = None,
 ) -> Resolution:
-    """Return the environment a ``install <targets>`` command would create.
-
-    ``python`` describes the environment that will run the components; a check
-    that does not create one leaves it out. Without a chosen interpreter, the
-    closure is still checked against the newest supported one, so a set no
-    interpreter can run fails here instead of after the install selects one.
-    """
+    """Resolve ``targets`` and their ``requires`` closure into one environment."""
     names = tuple(sorted(set(targets)))
     resolution = Resolution(targets=names)
     if not names:
         resolution.errors.append("name at least one component to install")
         return resolution
-    pending = list(names)
+
     for name in names:
         if name not in catalog.components:
             resolution.errors.append(
                 f"unknown component {name!r}; known components: "
                 f"{', '.join(sorted(catalog.components))}"
             )
+
+    pending = list(names)
     while pending:
         name = pending.pop(0)
         if name in resolution.components:
             continue
         component = catalog.components.get(name)
         if component is None:
-            # Reported above or by the requires check that queued it.
             continue
         resolution.components[name] = component
         pending.extend(component.requires)
@@ -369,54 +364,203 @@ def resolve(
                     "the two declare env_conflicts; fix their manifests"
                 )
 
-    if python is not None:
-        resolution.errors.extend(
-            python_errors(python, ordered.values(), owner="the environment")
-        )
-    else:
-        # No environment exists yet, so name the closure that no supported
-        # interpreter can run. ``install`` would otherwise select the newest
-        # supported minor and report the same components one by one.
-        resolution.errors.extend(
-            python_errors(
-                choose_python(ordered.values()),
-                ordered.values(),
-                owner="the environment",
-            )
-        )
+    check_python = python if python is not None else choose_python(ordered.values())
+    resolution.errors.extend(
+        python_errors(check_python, ordered.values(), owner="the environment")
+    )
     _merge_index_settings(resolution, ordered.values())
 
-    names_in_env = list(ordered)
-    for index, left_name in enumerate(names_in_env):
-        for right_name in names_in_env[index + 1 :]:
-            left = ordered[left_name]
-            right = ordered[right_name]
+    env_names = list(ordered)
+    for idx, left_name in enumerate(env_names):
+        for right_name in env_names[idx + 1 :]:
+            left, right = ordered[left_name], ordered[right_name]
             if right_name in left.env_conflicts or left_name in right.env_conflicts:
-                resolution.errors.append(_format_conflict(left, right))
+                resolution.errors.append(
+                    f"components {left.name!r} and {right.name!r} cannot share an "
+                    f"environment (env_conflicts); install each separately: "
+                    f"`rpent-install install {left.name}` and "
+                    f"`rpent-install install {right.name}`"
+                )
 
     requirements = [
-        (component.name, requirement)
+        (component.name, req)
         for component in ordered.values()
-        for requirement in component.dependencies
+        for req in component.dependencies
     ]
-    if core_dependencies:
-        requirements.extend(("rpent", requirement) for requirement in core_dependencies)
+    requirements.extend(("rpent", req) for req in core_dependencies)
     if resolution.uses_planner:
         if not planner_dependencies:
-            requires_planner = [
-                name for name, component in ordered.items() if component.planner
-            ]
+            needs_planner = [name for name, comp in ordered.items() if comp.planner]
             resolution.errors.append(
                 "[project.optional-dependencies].planner is missing from "
                 "pyproject.toml, but these components declare 'planner = true': "
-                + ", ".join(requires_planner)
+                + ", ".join(needs_planner)
             )
-        requirements.extend(
-            ("rpent[planner]", requirement) for requirement in planner_dependencies
-        )
+        requirements.extend(("rpent[planner]", req) for req in planner_dependencies)
+
     for package, pins in _pin_conflicts(requirements).items():
         lines = "\n".join(f"  {owner}: {package} {pin}" for owner, pin in pins)
         resolution.errors.append(f"conflicting pins for {package!r}\n{lines}")
     resolution.errors.extend(_override_conflicts(ordered))
     resolution.errors = sorted(dict.fromkeys(resolution.errors))
     return resolution
+
+
+def render_requirements(
+    resolution: Resolution,
+    *,
+    core_dependencies: tuple[str, ...] = (),
+    planner_dependencies: tuple[str, ...] = (),
+) -> str:
+    """Render a deterministic requirements file for ``resolution``."""
+    target_args = " ".join(resolution.targets)
+    lines = [
+        f"# Generated by rpent-install for: {target_args}",
+        f"# Rerun: rpent-install install {target_args}",
+    ]
+    core = sorted(dict.fromkeys(core_dependencies))
+    if core:
+        lines.extend(["", "# RPent core", *core])
+    if resolution.uses_planner and planner_dependencies:
+        lines.extend(
+            [
+                "",
+                "# RPent planner (rpent[planner])",
+                *sorted(dict.fromkeys(planner_dependencies)),
+            ]
+        )
+    for name, component in resolution.components.items():
+        deps = sorted(dict.fromkeys(component.dependencies))
+        if deps:
+            lines.extend(["", f"# component {name}", *deps])
+    return "\n".join(lines) + "\n"
+
+
+def _requirement_lines(path: Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [
+        line.rstrip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def requirements_sha256(
+    resolution: Resolution,
+    *,
+    root: Path,
+    core_dependencies: tuple[str, ...] = (),
+    planner_dependencies: tuple[str, ...] = (),
+) -> str:
+    """Hash every manifest, override, and index input for ``resolution``."""
+    repo_root = root.resolve()
+    overrides: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for component in resolution.components.values():
+        for override in component.overrides:
+            path = override if override.is_absolute() else repo_root / override
+            if path in seen:
+                continue
+            seen.add(path)
+            display = (
+                str(path.relative_to(repo_root))
+                if path.is_relative_to(repo_root)
+                else str(path)
+            )
+            overrides.append({"path": display, "lines": _requirement_lines(path)})
+    overrides.sort(key=lambda item: item["path"])
+
+    payload = json.dumps(
+        {
+            "components": {
+                name: comp.manifest_sha256
+                for name, comp in sorted(resolution.components.items())
+            },
+            "core_dependencies": sorted(core_dependencies),
+            "planner_dependencies": (
+                sorted(planner_dependencies) if resolution.uses_planner else []
+            ),
+            "overrides": overrides,
+            "index": {
+                "url": resolution.index_url,
+                "extra_urls": sorted(resolution.extra_index_urls),
+                "strategy": resolution.index_strategy,
+            },
+            "uv_settings": read_uv_settings(repo_root),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def index_options(
+    resolution: Resolution, *, index_url_override: str | None = None
+) -> list[str]:
+    """Return ``uv`` index flags for ``resolution``."""
+    options: list[str] = []
+    index_url = index_url_override or resolution.index_url
+    if index_url:
+        options.extend(["--index-url", index_url])
+    for url in resolution.extra_index_urls:
+        options.extend(["--extra-index-url", url])
+    if resolution.index_strategy:
+        options.extend(["--index-strategy", resolution.index_strategy])
+    return options
+
+
+def manylinux_baseline(components: Iterable[Component]) -> str:
+    """Return the newest glibc baseline required by ``components``."""
+    baselines = [component.manylinux for component in components]
+    if not baselines:
+        return DEFAULT_MANYLINUX
+    return max(baselines, key=lambda v: tuple(int(p) for p in v.split("_")))
+
+
+def resolve_resolution(
+    resolution: Resolution,
+    *,
+    root: Path,
+    uv: str,
+    python: str,
+    core_dependencies: tuple[str, ...] = (),
+    planner_dependencies: tuple[str, ...] = (),
+) -> str:
+    """Verify that ``resolution`` compiles with ``uv pip compile``."""
+    from rpent.install.installer import run_command
+
+    platform_tag = PLATFORM_TAG.format(
+        baseline=manylinux_baseline(resolution.components.values())
+    )
+    requirements = render_requirements(
+        resolution,
+        core_dependencies=core_dependencies,
+        planner_dependencies=planner_dependencies,
+    )
+    with tempfile.TemporaryDirectory(prefix="rpent-resolve-") as directory:
+        source = Path(directory) / "requirements.in"
+        output = Path(directory) / "requirements.txt"
+        source.write_text(requirements, encoding="utf-8")
+        command = [
+            uv,
+            "pip",
+            "compile",
+            str(source),
+            "--python-version",
+            python,
+            "--python-platform",
+            platform_tag,
+            "--no-header",
+            "--no-annotate",
+            "--output-file",
+            str(output),
+            *index_options(resolution),
+        ]
+        for component in resolution.components.values():
+            for override in component.overrides:
+                command.extend(["--override", str(override)])
+        run_command(command, capture=True, cwd=root)
+        return output.read_text(encoding="utf-8")

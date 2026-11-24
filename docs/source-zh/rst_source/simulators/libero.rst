@@ -95,39 +95,25 @@ LIBERO
 
 首次使用 LIBERO-PRO，请先完成 :doc:`../get_started/quickstart` 的安装、资源下载和模型配置。本页用于选择更多任务与复现实验。
 
-``robot-libero`` 同时安装 standard LIBERO 与 LIBERO-PRO，运行时用 ``--libero-type`` 选择版本，并下载对应资源：
+``robot-libero`` 同时安装 standard LIBERO 与 LIBERO-PRO；LIBERO-plus 需要 ``robosuite<1.5``，请安装独立环境 ``robot-libero_plus``。运行时用 ``--libero-type`` 选择版本，并下载对应资源：
 
 .. list-table::
    :header-rows: 1
 
    * - ``--libero-type``
+     - 安装命令
      - 资源下载
    * - ``standard``
+     - ``./rpent-install.sh install robot-libero --venv .venv-libero``
      - ``libero-download-assets --skip-existing``
    * - ``pro``
+     - ``./rpent-install.sh install robot-libero --venv .venv-libero``
      - ``liberopro-download-assets --skip-existing``
    * - ``plus``
-     - ``liberoplus-download-assets --skip-existing``；模拟器包来自
-       ``sim-libero_plus``
+     - ``./rpent-install.sh install robot-libero_plus --venv .venv-libero-plus``
+     - ``liberoplus-download-assets --skip-existing``
 
-LIBERO-plus 要求 robosuite<1.5，不能和 standard、PRO 的包装进同一个环境，而 ``robot-libero`` 又依赖 ``sim-libero``。运行 plus 任务需要两个环境：机器人侧照常安装 ``robot-libero``，另建一个环境安装 plus 包，并用 ``LIBERO_TYPE=plus`` 启动它的环境服务：
-
-.. code-block:: bash
-
-   rpent-install install sim-libero_plus --venv .venv-libero-plus
-   LIBERO_TYPE=plus .venv-libero-plus/bin/python \
-     -m components.sim.libero.env_server --suite libero_object --task 0 --seed 0 \
-     --max-episode-steps 10000 --transport http --host 0.0.0.0 --port ENV_PORT
-
-再从 ``robot-libero`` 环境运行任务并指向该服务；suite、task、seed 和最大步数必须一致：
-
-.. code-block:: bash
-
-   rpent --robot libero --suite libero_object --task 0 --seed 0 \
-     --max-episode-steps 10000 --libero-type plus \
-     --env-endpoint ENV_HOST:ENV_PORT --planner claude_code
-
-standard、PRO 环境包含 Pi0.5（``rpent-openpi``）、SAM3 和 RLinf 运行时（``infra-rlinf``），``sim-libero_plus`` 会带上后者。模型权重需按下文单独下载。
+上述环境均已包含 Pi0.5（``rpent-openpi``）、SAM3 与 RLinf 运行时（``infra-rlinf``）。模型权重需按下文单独下载。
 
 VLA 配置
 --------

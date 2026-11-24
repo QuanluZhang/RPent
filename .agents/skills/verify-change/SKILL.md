@@ -35,10 +35,9 @@ pytest tests/unit_tests -v
 ```
 
 Inspect any files changed by hooks and rerun affected checks. The
-[unit workflow](../../../.github/workflows/unit.yml) installs the
-`infra-unit_cpu` component and runs the same suite; `fast ci` narrows the
-selection to the tests that mirror the changed components. Do not install
-every robot component for an unrelated change.
+[unit-test workflow](../../../.github/workflows/unittest.yml) installs the
+`infra-unit_cpu` component and runs the same suite across Python 3.10–3.12. Do
+not install every robot component for an unrelated change.
 
 For the supported GPU suites, follow the environment setup in the test guide
 and call [the existing runner](../../../tests/e2e_tests/run_gpu_suite.sh):

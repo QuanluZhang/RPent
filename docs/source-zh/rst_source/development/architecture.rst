@@ -75,6 +75,7 @@ RPent 将任务规划、工具执行和环境运行分开：规划器选择工�
      libero/
      robocasa/
      robotwin/
+     robolab/
      franka/
      dual_franka/
      robodojo/
@@ -85,9 +86,9 @@ RPent 将任务规划、工具执行和环境运行分开：规划器选择工�
      models/         # 模型服务，每个子目录一个可安装组件
      tools/          # 只依赖 rpent 的工具
      infra/          # 基础设施组件：只有清单，没有代码
-   rpent-install.sh  # 在全新检出中引导安装器
+   rpent-install.sh  # 在全新源码目录中引导安装器
    tests/
-     tooling/        # 仓库检查与 CI 选路
+     tooling/        # 仓库结构与导入边界检查
 
 环境发现与接入
 ---------------------

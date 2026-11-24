@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 import importlib
+import sys
 from argparse import ArgumentParser
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from string import Formatter
-import sys
 
 import pytest
 
@@ -147,7 +147,9 @@ class _BlockImport:
 
     def find_spec(self, name, path=None, target=None):
         if name == self._module:
-            raise ModuleNotFoundError(f"No module named {self._missing!r}", name=self._missing)
+            raise ModuleNotFoundError(
+                f"No module named {self._missing!r}", name=self._missing
+            )
         return None
 
 

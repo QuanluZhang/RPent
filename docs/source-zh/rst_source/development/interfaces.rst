@@ -6,7 +6,7 @@
 机器人入口
 ----------
 
-把包放到 ``robots/<robot>/`` 后，包的 ``__init__.py`` 会重导出 ``spec.py`` 中实现的两个函数（a_5 之前为 ``robot_spec.py``），供 ``main.py`` 调用：
+把包放到 ``robots/<robot>/`` 后，包的 ``__init__.py`` 会重导出 ``robot_spec.py`` 中实现的两个函数，供 ``main.py`` 调用：
 
 .. code-block:: python
 
@@ -80,8 +80,6 @@ Planner
    def add_tool(self, tool: Tool, *, replace: bool = False) -> None: ...
 
 用 ``@tool`` 声明函数或方法，参数类型注解和 Google 风格 docstring 提供 schema 与说明；``@tool(readonly=True)`` 允许只读工具并行执行，并跳过动作后的状态采集。处理函数返回 ``ToolResult(data=..., images=...)``：``data`` 保存 JSON 数据，按需包含 ``error`` 或 ``_finish``；``images`` 保存 PNG 字节。
-
-``call_ok`` 和 ``no_execution`` 描述调用本身而不是返回值。框架拒绝调用（未知工具、参数不符合 schema、被取消）时设置它们，``to_dict()`` 随之发布 ``call_ok: false``；工具根本没有执行、环境状态未变时还会带上 ``no_execution: true``。工具已经执行、在自己的返回值中报告 ``error`` 时，``call_ok`` 仍为 true。
 
 必须传入 ``MemoryManager``，基类始终注册公共文件工具和 ``finish``。子类 ``super().__init__()`` 后追加本机器人工具即可。逐步状态与 ``view_env_state`` 见 :doc:`add_primitive`。
 
