@@ -245,12 +245,9 @@ toolkit 模块通常包含四部分：
 外部 MCP 工具
 ~~~~~~~~~~~~~
 
-RPent 支持通过两种方式接入外部 MCP 服务的工具：
+RPent 会在 ``get_toolkit`` 返回后，自动把 ``--mcp-config`` 和 ``RunConfig.mcp_servers`` 中的外部 MCP 服务注册到 ``Toolkit``\ （工具名为 ``<server>__<tool>``，见 :ref:`external-mcp-servers`\ ）。所有在线规划器（``api``、``claude_code``、``codex`` 和 ``gemini_cli``）都通过同一个 ``Toolkit`` 接口调用这些工具。
 
-- **接入规划器**\ （在配置中声明 ``planner_tools``，见 :ref:`external-mcp-servers`）：适用于与机器人动作无关、出错后可安全重试，且需要把远端返回值直接交回模型的独立工具。
-- **注册到 Toolkit**\ （调用 ``Toolkit.add_mcp_tools``）：适用于需要与机器人动作串行协调、触发动作后观测采集，或不可自动重试的外部硬件工具（``api`` 规划器会把 ``planner_tools`` 的调用报错视为可重试错误，而 MCP 协议无法区分参数错误与硬件故障）。
-
-``get_toolkit`` 会收到本次运行的 ``config``，因此既可以注册来自共享 ``--mcp-config`` 的服务，也可以注册机器人自带的 MCP 服务：
+如果机器人接入代码需要显式控制某个服务的工具范围或同步方式，可以在 ``get_toolkit`` 中调用 :meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools`：
 
 .. code-block:: python
 
@@ -264,17 +261,12 @@ RPent 支持通过两种方式接入外部 MCP 服务的工具：
        )
        toolkit.add_mcp_tools(
            config.mcp_servers,
-           tools={"power": ["set_charging_dock", "read_battery"]},
+           tools={"dock": ["set_charging_dock", "read_battery"]},
+           sync_with_robot=True,
        )
        return toolkit
 
-注册到 Toolkit 的外部 MCP 工具具有以下行为与限制：
-
-- **构建期校验与命名：** ``add_mcp_tools`` 在构建 Toolkit 时就会拉取服务端工具列表，因此被注册的服务当时必须可达，任何不存在的工具名都会在首次调用前抛出 ``ValueError``。远端输入 schema 保持原有结构，其中的文本会与本地工具一样经过 ``{{...}}`` 占位符替换。``claude_code`` 和 ``codex`` 将其暴露为 ``mcp__rpent__<name>``，``api`` 使用原名。
-- **独占顺序执行：** 注册后的工具与本地动作工具一样以独占方式执行；服务端的 ``readOnlyHint`` 会被忽略，因为与机器人动作串行排序正是将其注册到 Toolkit 的原因。
-- **观测与返回值处理：** 调用成功时，远端返回的文本与结构化数据会写入轨迹记录并作为 ``result`` 传给 ``get_env_state``，而返回给模型的数据部分来自 ``get_env_state`` 采集的观测结果，而非远端原始字段；需要暴露给模型的信息应通过 ``get_env_state`` 带入观测。调用失败时，远端错误字段会合并进该观测。远端返回的 ``image/png`` 块会转为原生 ``ToolResult.images``，与环境观测图像一并返回给模型；其他非文本块只保留元数据，不包含原始内容。
-- **单处接入规则：** 同一个服务既可以在 ``planner_tools`` 中暴露独立工具，也可以在 ``add_mcp_tools`` 中注册需协调的工具，但同一个工具名只能出现在一处（重复注册会抛出 ``ValueError``）。仅由 Toolkit 使用的服务应省略 ``planner_tools``，这样规划器（含启动检查）会完全跳过它。由于 ``claude_code`` 会把配置了 ``planner_tools`` 的服务整体接入，包含需协调工具的服务不要设置 ``planner_tools``\ （见 :ref:`external-mcp-servers`）。
-- **同步取消限制：** 注册后的调用以同步方式执行，无法在执行中途取消；取消运行时最多等待一个 ``MCP_CALL_TIMEOUT_S`` 超时周期（见 :ref:`external-mcp-servers`）。
+已通过 ``add_mcp_tools`` 显式注册的服务会被自动注册流程跳过，不会重复挂载。设置 ``sync_with_robot=True`` 后，工具调用与机器人动作独占串行执行，触发 ``get_env_state``，并将远端返回内容保留在观测的 ``tool_result`` 字段中。
 
 建议遵循的约定
 --------------
@@ -301,7 +293,7 @@ RPent 支持通过两种方式接入外部 MCP 服务的工具：
 - ``output_dir`` —— 单次运行的临时目录路径。main.py 随后调用 ``init_output_dir`` 创建目录并配置日志。
 - ``prompt_vars`` —— 传给 ``PromptBundle.render`` 的字典，通常包含运行标识和 prompt 引用的其他变量。
 - ``task_desc`` —— 机器人特定的任务标识字典，会原样写入 transcript JSON 记录（LIBERO 使用 ``{"suite": ..., "task": ..., "seed": ...}``）。
-- ``mcp_servers`` —— 可选的元组，列出该机器人自带的 MCP 服务（例如使用 :func:`~rpent.utils.mcp_servers.parse_mcp_servers` 从机器人配置文件的 ``mcp_servers`` 字段解析得到）。CLI 会合并 ``--mcp-config`` 中的共享配置，若机器人没有自有服务留空即可。两处来源的服务名必须唯一。只有声明了 ``planner_tools`` 的服务会进入规划器；需协调的工具通过 :meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools` 注册。参见 :ref:`external-mcp-servers`。
+- ``mcp_servers`` —— 可选的元组，列出该机器人自带的 MCP 服务（例如用 :func:`~rpent.utils.mcp_servers.parse_mcp_servers` 从机器人配置文件的 ``mcp_servers`` 字段解析得到）。CLI 会合并 ``--mcp-config`` 中的共享服务，``get_toolkit`` 会将它们注册到机器人的 ``Toolkit``。两处来源的服务名必须唯一，参见 :ref:`external-mcp-servers`。
 
 .. code-block:: python
 

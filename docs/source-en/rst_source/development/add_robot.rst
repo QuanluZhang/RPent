@@ -341,20 +341,15 @@ the toolkit passes verbatim to your primitives' ``__init__`` — typically
 External MCP Tools
 ~~~~~~~~~~~~~~~~~~
 
-RPent can attach an external MCP server either to the planner or to the
-``Toolkit``:
+RPent automatically registers external MCP servers from ``--mcp-config`` and
+``RunConfig.mcp_servers`` on the returned ``Toolkit`` under
+``<server>__<tool>`` names (see :ref:`external-mcp-servers`). Every online
+planner (``api``, ``claude_code``, ``codex``, and ``gemini_cli``) exposes those
+tools through the same ``Toolkit`` bridge.
 
-- **Attach to the planner** (``planner_tools`` in :ref:`external-mcp-servers`)
-  when the tool is independent of robot actions, safe to retry on error, and
-  should return its remote payload directly to the model.
-- **Register on the Toolkit** (``Toolkit.add_mcp_tools``) when the tool controls
-  or reads external hardware that must serialize with robot actions, trigger
-  post-action observation capture, or avoid automatic retries on failure (the
-  ``api`` planner treats errors from ``planner_tools`` as retryable, whereas
-  MCP does not distinguish argument errors from device faults).
-
-``get_toolkit`` receives the run's ``config``, so it can register tools from
-both the shared ``--mcp-config`` file and robot-owned MCP servers:
+When a robot integration needs programmatic control over specific servers—for
+example, to pin a subset of tools or force ``sync_with_robot=True`` inside
+``get_toolkit``—call :meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools`:
 
 .. code-block:: python
 
@@ -368,40 +363,15 @@ both the shared ``--mcp-config`` file and robot-owned MCP servers:
        )
        toolkit.add_mcp_tools(
            config.mcp_servers,
-           tools={"power": ["set_charging_dock", "read_battery"]},
+           tools={"dock": ["set_charging_dock", "read_battery"]},
+           sync_with_robot=True,
        )
        return toolkit
 
-Key behaviors and limits for Toolkit-registered MCP tools:
-
-- **Build-time validation and naming:** ``add_mcp_tools`` lists the server's
-  tools during toolkit construction, so the server must be reachable then and
-  any missing tool name raises ``ValueError`` before the first call. Remote
-  input schemas keep their structure, while schema text goes through the same
-  ``{{...}}`` substitution as local tools. ``claude_code`` and ``codex`` expose
-  registered tools as ``mcp__rpent__<name>``; ``api`` uses their original names.
-- **Exclusive execution:** Registered tools run exclusively alongside local
-  action tools; the server's ``readOnlyHint`` is ignored because serialization
-  with robot actions is the reason to register the tool here.
-- **Observation and result handling:** On success, the remote tool's text and
-  structured data are recorded in trajectory capture and passed as ``result``
-  to ``get_env_state``, while the model receives ``get_env_state``'s captured
-  observation data instead of the raw remote payload. Surface any fields the
-  model must see through ``get_env_state``; on failure, remote error fields are
-  merged into that observation. Remote ``image/png`` blocks are converted to
-  native ``ToolResult.images`` and included alongside captured observation
-  images; other non-text block types arrive only as metadata without their
-  payload.
-- **Single-attachment rule:** One server can supply independent tools via
-  ``planner_tools`` and coordinated tools via ``add_mcp_tools``, provided no
-  tool name is attached in both places (duplicates raise ``ValueError``). Leave
-  ``planner_tools`` unset for Toolkit-only servers so the planner skips them,
-  including startup checks. Because ``claude_code`` mounts every
-  planner-attached server whole, keep servers that carry coordinated tools out
-  of ``planner_tools`` entirely (:ref:`external-mcp-servers`).
-- **Synchronous cancellation limit:** A registered call runs synchronously and
-  cannot be cancelled mid-flight; cancelling a run waits up to
-  ``MCP_CALL_TIMEOUT_S`` (:ref:`external-mcp-servers`).
+Servers registered explicitly through ``add_mcp_tools`` are skipped by automatic
+attachment so they are never duplicated. Setting ``sync_with_robot=True``
+serializes calls against robot actions, runs ``get_env_state``, and preserves
+the remote response under ``tool_result``.
 
 Conventions Worth Keeping
 -------------------------
@@ -452,10 +422,8 @@ validates those fields and returns a
 - ``mcp_servers`` — optional tuple of MCP servers this robot contributes
   (for example, parsed from a robot config file's ``mcp_servers`` section with
   :func:`~rpent.utils.mcp_servers.parse_mcp_servers`). The CLI merges in
-  servers from ``--mcp-config``, so leave it empty when the robot owns none.
-  Server names must be unique across both sources. Only specs with
-  ``planner_tools`` reach a planner; coordinated tools are registered through
-  :meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools`. See
+  servers from ``--mcp-config`` and ``get_toolkit`` registers them on the
+  robot's ``Toolkit``. Server names must be unique across both sources. See
   :ref:`external-mcp-servers`.
 
 .. code-block:: python
