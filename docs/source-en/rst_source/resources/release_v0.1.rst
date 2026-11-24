@@ -108,7 +108,8 @@ Models
 - **Planners and models**: Codex, Claude Code, and RPent's built-in planner can connect to models
   such as Claude, GPT, and Qwen, with planner-specific reasoning effort, turn limits, and timeouts.
   In LIBERO, RoboCasa365, and RoboTwin, planners can also output action control values for the
-  environment to execute directly. :doc:`Configuration guide </rst_source/guides/configure_planner>`
+  environment to execute directly. :doc:`Configuration guide </rst_source/guides/configure_planner>` |
+  :ref:`Direct actions <planner-direct-actions>`
 
 - **VLA models**: Pi0.5 for LIBERO, RoboDojo, Dual Franka, and YAM; RLDX-1 for RoboCasa365; and
   LingBot-VLA for RoboTwin. :doc:`Pi0.5 </rst_source/simulators/libero>` | :doc:`RLDX-1

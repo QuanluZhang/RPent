@@ -338,18 +338,16 @@ filenames rather than maintaining a parallel observation index.
 the toolkit passes verbatim to your primitives' ``__init__`` — typically
 ``{"env": MyEnvClient(...), "model": VLAClient(...), ...}``.
 
-External MCP Tools
-~~~~~~~~~~~~~~~~~~
+Customizing External MCP Registration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-RPent automatically registers external MCP servers from ``--mcp-config`` and
+No robot code is required to support ``--mcp-config``: RPent automatically
+registers external MCP servers from ``--mcp-config`` and
 ``RunConfig.mcp_servers`` on the returned ``Toolkit`` under
-``<server>__<tool>`` names (see :ref:`external-mcp-servers`). Every online
-planner (``api``, ``claude_code``, ``codex``, and ``gemini_cli``) exposes those
-tools through the same ``Toolkit`` bridge.
-
-When a robot integration needs programmatic control over specific servers—for
-example, to pin a subset of tools or force ``sync_with_robot=True`` inside
-``get_toolkit``—call :meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools`:
+``<server>__<tool>`` names (see :ref:`external-mcp-servers`). Call
+:meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools` inside ``get_toolkit`` only
+when a robot integration needs to pin a subset of tools or force
+``sync_with_robot=True``:
 
 .. code-block:: python
 

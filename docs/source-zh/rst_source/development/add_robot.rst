@@ -242,12 +242,10 @@ toolkit 模块通常包含四部分：
 
 ``runtime_kwargs`` 由 ``robot_spec.py:get_toolkit`` 转发给 toolkit，再原样传入 primitives 的 ``__init__``。其中通常包含 ``{"env": MyEnvClient(...), "model": VLAClient(...), ...}``。
 
-外部 MCP 工具
-~~~~~~~~~~~~~
+自定义外部 MCP 注册
+~~~~~~~~~~~~~~~~~~~
 
-RPent 会在 ``get_toolkit`` 返回后，自动把 ``--mcp-config`` 和 ``RunConfig.mcp_servers`` 中的外部 MCP 服务注册到 ``Toolkit``\ （工具名为 ``<server>__<tool>``，见 :ref:`external-mcp-servers`\ ）。所有在线规划器（``api``、``claude_code``、``codex`` 和 ``gemini_cli``）都通过同一个 ``Toolkit`` 接口调用这些工具。
-
-如果机器人接入代码需要显式控制某个服务的工具范围或同步方式，可以在 ``get_toolkit`` 中调用 :meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools`：
+支持 ``--mcp-config`` 不需要编写额外的机器人代码：RPent 会在 ``get_toolkit`` 返回后自动将 ``--mcp-config`` 和 ``RunConfig.mcp_servers`` 中的外部 MCP 服务以 ``<server>__<tool>`` 名称注册到 ``Toolkit``\ （见 :ref:`external-mcp-servers`\ ）。仅当机器人接入代码需要限定工具子集或强制 ``sync_with_robot=True`` 时，才需要在 ``get_toolkit`` 中调用 :meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools`：
 
 .. code-block:: python
 
