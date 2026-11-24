@@ -30,7 +30,7 @@ RPent organizes tools into four families:
      - Call third-party Streamable HTTP MCP services alongside robot tools with zero Python code.
      - Power meters, charging docks, facility sensors (see :doc:`mcp`)
 
-Action primitives advance the environment and trigger observation capture after execution. Perception, memory, and default external MCP tools return their own payload directly without overwriting robot state. ``finish`` ends the planner loop; task success is determined by the environment's native ``terminated`` signal or a real-robot operator.
+Action primitives advance the environment and trigger observation capture after execution. Perception, memory, and default external MCP tools return their own payload directly without triggering environment state capture. ``finish`` ends the planner loop; task success is determined by the environment's native success criterion or a real-robot operator.
 
 .. _planner-direct-actions:
 
