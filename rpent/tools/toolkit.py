@@ -267,7 +267,7 @@ class Toolkit:
         # A registered remote tool's schema may admit properties this model does
         # not declare (``extra="allow"``); forward them so the call carries
         # every argument the server accepted. Local schemas forbid extras.
-        kwargs.update(getattr(parameters, "model_extra", None) or {})
+        kwargs.update(parameters.model_extra or {})
 
         try:
             operation = self._scheduler.acquire(readonly=tool.readonly)

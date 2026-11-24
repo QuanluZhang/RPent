@@ -133,10 +133,12 @@ class McpServerSpec:
                 f"servers are supported (got {self.url!r})"
             )
         try:
-            userinfo = urlsplit(self.url).username
+            parts = urlsplit(self.url)
         except ValueError as exc:
             raise ValueError(f"{where}.url is not a valid URL: {exc}") from exc
-        if userinfo is not None:
+        if not parts.hostname:
+            raise ValueError(f"{where}.url must include a hostname (got {self.url!r})")
+        if parts.username is not None or parts.password is not None:
             raise ValueError(
                 f"{where}.url must not embed credentials; use headers or "
                 "env_http_headers"

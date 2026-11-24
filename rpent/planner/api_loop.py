@@ -225,9 +225,8 @@ class ApiAgentLoop(Planner):
                 submit_while_busy=True,
             )
         try:
-            # Building the toolsets resolves env-backed MCP headers, so keep it
-            # inside the try: a bad shared config must end as PlannerResult.error,
-            # not as an exception that skips RPent's normal failure handling.
+            # Guard Agent construction so any toolset or model-settings setup
+            # error returns PlannerResult.error instead of escaping solve().
             agent = Agent(
                 capture if capture is not None else self.model,
                 name="rpent_api",
@@ -719,6 +718,14 @@ class _HarnessToolkit(FunctionToolset):
                     call.start()
                 try:
                     result = await call_tool(name, args)
+                except asyncio.CancelledError:
+                    self.stopping.set()
+                    if call is not None:
+                        call.finish(
+                            "cancelled",
+                            "Cancelled while external MCP tool call was in flight.",
+                        )
+                    raise
                 except Exception as exc:
                     # Keep tool_call/tool_result paired even when the remote
                     # fails. A remote ``isError`` raises ``ModelRetry``, and
@@ -737,6 +744,9 @@ class _HarnessToolkit(FunctionToolset):
                 self._record_result(tool, ctx, text)
                 if self.capture is not None:
                     self.capture.feedback(ctx, "mcp.tool_result", text)
+                if self.stopping.is_set():
+                    ctx.cancel()
+                    raise asyncio.CancelledError
                 return _omit_external_images(result) if self.no_images else result
 
         return hook

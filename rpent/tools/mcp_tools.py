@@ -414,9 +414,18 @@ async def run_remote(
     ClientSession, streamablehttp_client = _mcp_client()
     headers = request_headers(spec) or None
     timeout = timedelta(seconds=call_timeout_s())
+    # Keep the HTTP read timeout slightly above ClientSession's deadline so
+    # ClientSession raises a single McpError timeout instead of racing with
+    # httpx.ReadTimeout inside anyio's TaskGroup, while still allowing
+    # MCP_CALL_TIMEOUT_S values above mcp's 300 s default.
+    sse_read_timeout = timeout + timedelta(seconds=5)
     try:
         async with streamablehttp_client(
-            spec.url, headers=headers, terminate_on_close=False
+            spec.url,
+            headers=headers,
+            timeout=timeout,
+            sse_read_timeout=sse_read_timeout,
+            terminate_on_close=False,
         ) as (
             read,
             write,

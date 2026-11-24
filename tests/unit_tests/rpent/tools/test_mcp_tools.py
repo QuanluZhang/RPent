@@ -674,10 +674,14 @@ def test_closing_a_session_does_not_terminate_it_on_the_server(
     async def action(session: Any) -> str:
         return "done"
 
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_S", "12.5")
     assert asyncio.run(mcp_tools.run_remote(spec, action)) == "done"
     # The transport's DELETE waits for the server to finish the in-flight call,
     # so a timed-out call would otherwise keep running for the tool's runtime.
     assert opened[0]["terminate_on_close"] is False
+    expected_timeout = mcp_tools.timedelta(seconds=12.5)
+    assert opened[0]["timeout"] == expected_timeout
+    assert opened[0]["sse_read_timeout"] > expected_timeout
 
 
 def test_registered_tool_deadline_ends_a_slow_call(

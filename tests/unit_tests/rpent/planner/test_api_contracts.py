@@ -39,6 +39,7 @@ from pydantic_ai import (
     ModelResponse,
     ModelRetry,
     TextPart,
+    ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
@@ -61,6 +62,7 @@ from rpent.planner.api_loop import (
 from rpent.planner.utils.http_mcp_server import HttpMcpServer
 from rpent.prompt.api import API_PLANNER_INSTRUCTIONS, render_environment_context
 from rpent.session import EnvState, Payload
+from rpent.session.planner_capture import CapturingModel
 from rpent.tools import Toolkit, ToolResult, common
 from rpent.tools import tool as declare_tool
 from rpent.tools.base import MAX_TOOL_TEXT_BYTES, tool_error
@@ -2153,6 +2155,38 @@ def test_external_tool_error_under_capture_reaches_the_model_as_a_retry(
     assert call.name == "web_lookup" and call.status == "failed"
     # The retry feedback is captured once, by the shared capture lifecycle.
     assert call.feedback.format == "pydantic_ai.model_retry"
+
+
+def test_external_tool_hook_records_cancellation_as_cancelled(tmp_path) -> None:
+    events = Events()
+    toolkit = capturing_toolkit(tmp_path / "captures", events)
+    capture = CapturingModel(TestModel(), toolkit.state, "conv-cancel")
+    ctx = SimpleNamespace(run_id="run-1", run_step=1, tool_call_id="call-cancel")
+    capture.before_request(ctx)
+    planner_id = toolkit.state.register_planner(
+        backend="api", request=Payload("test", {})
+    )
+    capture.response(
+        planner_id,
+        ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="web_wait", args={}, tool_call_id="call-cancel")
+            ]
+        ),
+    )
+    adapter = _HarnessToolkit(
+        toolkit, dashboard_events=events, no_images=True, capture=capture
+    )
+
+    async def cancelled_call(name, args):
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(adapter.external_tool_hook("web")(ctx, cancelled_call, "wait", {}))
+
+    assert adapter.stopping.is_set()
+    call = toolkit.state.planner_records()[0].tool_calls[0]
+    assert call.status == "cancelled"
 
 
 def test_external_result_text_renders_result_shapes() -> None:

@@ -251,17 +251,17 @@ RPent 的 ``--model`` 必须与 vLLM 的 ``--served-model-name`` 保持一致。
 接入外部 MCP 服务
 -----------------
 
-RPent 可以把外部 MCP 服务的工具和自身工具一起交给模型。用 ``--mcp-config`` 传入一份 YAML，所有 robot 无需改代码即可使用。本页只讲如何挂到规划器；注册到 Toolkit 见 :ref:`add-robot-toolkit`。
+RPent 可以将外部 MCP 服务的工具与自身工具一并提供给模型。通过 ``--mcp-config`` 传入一份 YAML 配置，即可为任意机器人的规划器接入外部服务，无需修改代码。如果需要在机器人接入代码中注册工具，使其与机器人动作顺序执行并参与观测采集，请参见 :ref:`add-robot-toolkit`。
 
 前置条件：
 
-- 服务使用 Streamable HTTP（``http://`` 或 ``https://``）。RPent 不支持 stdio 服务（``command``）。
-- 规划器为 ``api``、``claude_code`` 或 ``codex``。``gemini_cli`` 和 ``flash`` 不接入外部服务，遇到声明了 ``planner_tools`` 的服务会让运行失败。
+- 服务使用 Streamable HTTP（``http://`` 或 ``https://``）。RPent 不支持通过 ``command`` 启动的 stdio 服务。
+- 规划器为 ``api``、``claude_code`` 或 ``codex``。``gemini_cli`` 和 ``flash`` 不支持接入外部服务，若配置中包含声明了 ``planner_tools`` 的服务，运行会直接失败。
 
 快速开始
 ~~~~~~~~
 
-下面的示例在本地起一个服务。把脚本保存为 ``power_meter.py``：
+下面的示例会在本地启动一个测试服务。将脚本保存为 ``power_meter.py``：
 
 .. dropdown:: 示例服务端（``power_meter.py``）
 
@@ -281,13 +281,13 @@ RPent 可以把外部 MCP 服务的工具和自身工具一起交给模型。用
       if __name__ == "__main__":
           mcp.run(transport="streamable-http")
 
-``mcp`` 已是 RPent 的依赖。服务地址为 ``http://127.0.0.1:8765/mcp``。先启动它：
+``mcp`` 已包含在 RPent 依赖中，服务监听地址为 ``http://127.0.0.1:8765/mcp``。先启动服务：
 
 .. code-block:: bash
 
    python power_meter.py
 
-把下面的内容保存为 ``power.yaml``：
+将下面的内容保存为 ``power.yaml``：
 
 .. code-block:: yaml
 
@@ -296,14 +296,14 @@ RPent 可以把外部 MCP 服务的工具和自身工具一起交给模型。用
        url: http://127.0.0.1:8765/mcp
        planner_tools: [read_power_meter]
 
-然后运行：
+然后使用 ``--mcp-config`` 启动一次任务（以下以 LIBERO 和 ``claude_code`` 为例；机器人与规划器的环境准备见 :doc:`../get_started/quickstart`）：
 
 .. code-block:: bash
 
    rpent --robot libero --mcp-config power.yaml \
      --suite libero_goal_task --task 1 --seed 0 --planner claude_code
 
-启动不报错就表示接入成功：模型看到工具 ``mcp__power__read_power_meter``，调用后返回上面那段电量文本。接入真实服务时替换 URL 和工具名；需要认证时见下一节。
+如果启动没有出现规划器错误，说明服务已接入成功：模型可以看到工具 ``mcp__power__read_power_meter``，调用后返回 ``battery 82%, outlet idle``。接入真实服务时，替换为对应的地址与工具名即可；认证配置见下一节。
 
 服务字段
 ~~~~~~~~
@@ -317,48 +317,48 @@ RPent 可以把外部 MCP 服务的工具和自身工具一起交给模型。用
      - 含义
    * - ``url``
      - 是
-     - 服务的 Streamable HTTP 端点；带用户名或密码会被拒绝。
+     - 服务的 Streamable HTTP 端点；包含用户名或密码会被拒绝。
    * - ``headers``
      - 否
-     - 固定请求头。读取配置时解析 ``${oc.env:...}``。
+     - 写在配置文件中的请求头；读取配置时会解析 ``${oc.env:VAR_NAME}``。
    * - ``env_http_headers``
      - 否
-     - 请求头名到环境变量名的映射。变量值原样发送，需包含完整取值，例如 ``Bearer <token>``。同一个请求头名不能同时出现在两个字段中。
+     - 请求头名到环境变量名的映射。变量值会原样发送，因此需包含完整取值，例如 ``Bearer <token>``。同一个请求头名不能同时出现在 ``headers`` 和 ``env_http_headers`` 中。
    * - ``planner_tools``
      - 否
-     - 规划器可以调用哪些工具：``"*"``、工具名列表，或省略。
+     - 规划器可调用的工具范围：``"*"``\ （服务提供的全部工具）、工具名列表，或省略（不接入规划器）。
 
 .. warning::
 
-   凭据请放进 ``env_http_headers``。``headers`` 的字面值会出现在 ``claude_code`` 和 ``codex`` 子进程的命令行上，同机其他用户可读取。
+   凭据请放在 ``env_http_headers`` 中。``headers`` 中的所有取值——包括 ``${oc.env:...}`` 解析后的结果——都会出现在 ``claude_code`` 和 ``codex`` 子进程的命令行中，同机其他用户可读取。
 
-``planner_tools`` 有三种写法：
+对接需要认证的服务时，应通过 ``env_http_headers`` 引用环境变量，而不是写在 ``headers`` 中：
 
-- ``"*"``：服务提供的全部工具都交给规划器。
-- 工具名列表：只把列出的工具交给规划器。
-- 省略：服务不进入规划器。
+.. code-block:: yaml
 
-``claude_code`` 会挂载整个服务，列表只决定哪些工具自动批准。未列出的工具仍对模型可见，但在非交互运行中调用会被拒绝，因为没有可应答的授权提示。需要区分权限时，请按权限边界拆成多个服务条目。
+   mcp_servers:
+     power:
+       url: https://power.example.com/mcp
+       env_http_headers:
+         Authorization: POWER_API_TOKEN  # 例如 export POWER_API_TOKEN="Bearer <token>"
+       planner_tools: [read_power_meter]
 
-服务名会进入工具名：``claude_code`` 和 ``codex`` 为 ``mcp__<server>__<tool>``，``api`` 为 ``<server>_<tool>``。服务名必须以字母或数字开头，其余字符只能是字母、数字、``_`` 或 ``-``；不能包含 ``__``，不能以 ``_`` 结尾，也不能用 ``rpent``。
+``claude_code`` 会接入整个服务，``planner_tools`` 中的工具名列表仅决定哪些工具自动获批。未列出的工具仍对模型可见，但在非交互运行中调用会被拒绝，因为没有可应答的授权提示。若需严格隔离工具权限，请按权限边界拆分为独立的 MCP 服务。
+
+服务名会作为工具名的一部分：``claude_code`` 和 ``codex`` 使用 ``mcp__<server>__<tool>``，``api`` 使用 ``<server>_<tool>``。由于 ``api`` 使用单个下划线拼接，其外部工具可能与 RPent 内置工具或其他服务的工具重名；``claude_code`` 和 ``codex`` 带有 ``mcp__`` 前缀，不会发生冲突。服务名必须以字母或数字开头，其余字符只能是字母、数字、``_`` 或 ``-``；不能包含 ``__``，不能以 ``_`` 结尾，也不能命名为 ``rpent``。
 
 启动检查与超时
 ~~~~~~~~~~~~~~
 
-每次运行在第一次模型请求前连接所有设置了 ``planner_tools`` 的服务。以下任一情况会让运行以规划器错误结束：
+每次运行在发起首次模型请求前，都会连接所有设置了 ``planner_tools`` 的服务。出现以下任一情况时，运行会以规划器错误结束：
 
 - 服务不可达。
 - ``env_http_headers`` 引用的环境变量未设置。
-- ``planner_tools`` 列了服务没有提供的工具名；报错会列出该服务提供的工具名。
+- ``planner_tools`` 列出了服务未提供的工具名（错误信息会列出该服务实际提供的工具）。
 
-RPent 进程内的 MCP 请求默认 60 秒超时，可用 ``MCP_CALL_TIMEOUT_S`` 修改，单位为秒。``claude_code`` 和 ``codex`` 在自己的 CLI 子进程里连接服务，遵循这些 CLI 的超时。
+RPent 进程内发起的 MCP 请求——包括启动检查、``api`` 规划器调用以及机器人注册的工具——默认 60 秒超时，可通过 ``MCP_CALL_TIMEOUT_S`` 修改（单位为秒）。该超时同时限制取消运行时等待在途调用的最长时间；关闭已超时的会话不会等待远端工具执行完毕。
 
-.. dropdown:: 实现细节
-
-   - 60 秒时限也覆盖注册到 Toolkit 的工具和 ``api`` 连接。取消一次运行时，等待在途调用同样以它为上限；关闭超时的会话不会等远端执行完。
-   - ``claude_code`` 和 ``codex`` 的启动检查在 ``--planner-timeout-s`` 开始计时之前执行，因此卡住的服务最多会先占两个请求时限：连接一次，列出工具一次。
-   - ``api`` 用单个下划线拼接工具名，可能与 RPent 工具或另一个服务的工具重名；``claude_code`` 和 ``codex`` 使用 ``mcp__`` 前缀，不会重名。
-   - 任务记录中的 ``url`` 会去掉查询串和片段。
+``claude_code`` 和 ``codex`` 在各自的 CLI 子进程中连接服务，执行期间遵循对应 CLI 自身的超时设置。但它们的启动检查仍在 RPent 进程内、``--planner-timeout-s`` 开始计时之前完成，因此卡住的服务最多会先消耗两个 ``MCP_CALL_TIMEOUT_S`` 周期（连接一次，列出工具一次）。任务记录保存 ``url`` 时会自动去掉查询串和片段。
 
 .. _planner-check:
 

@@ -119,7 +119,9 @@ def test_construction_rejects_a_spec_no_backend_could_use() -> None:
         {"name": "bad name", "url": "https://web.example/mcp"},
         {"name": "power_", "url": "https://web.example/mcp"},
         {"name": "web", "url": "ftp://web.example/mcp"},
+        {"name": "web", "url": "http://"},
         {"name": "web", "url": "https://user:pass@web.example/mcp"},
+        {"name": "web", "url": "https://:pass@web.example/mcp"},
     ):
         with pytest.raises(ValueError, match=r"mcp_servers\."):
             McpServerSpec(**values)
