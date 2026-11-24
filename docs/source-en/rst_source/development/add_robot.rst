@@ -341,13 +341,14 @@ the toolkit passes verbatim to your primitives' ``__init__`` — typically
 Customizing External MCP Registration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-No robot code is required to support ``--mcp-config``: RPent automatically
-registers external MCP servers from ``--mcp-config`` and
-``RunConfig.mcp_servers`` on the returned ``Toolkit`` under
-``<server>__<tool>`` names (see :ref:`external-mcp-servers`). Call
-:meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools` inside ``get_toolkit`` only
-when a robot integration needs to pin a subset of tools or force
-``sync_with_robot=True``:
+This subsection explains how to override external MCP registration in robot
+code. By default, RPent automatically registers every external server from
+``--mcp-config`` (a YAML file path) and ``RunConfig.mcp_servers`` after
+``get_toolkit`` returns, so most robots need no extra code (see
+:ref:`external-mcp-servers`). Call
+:meth:`~rpent.tools.toolkit.Toolkit.add_mcp_tools` before returning from
+``get_toolkit`` only when your robot needs to restrict a server to specific
+tools or force ``sync_with_robot=True``:
 
 .. code-block:: python
 
@@ -417,12 +418,9 @@ validates those fields and returns a
 - ``task_desc`` — robot-specific dict of task-identifying fields, written into
   the transcript JSON record verbatim (LIBERO:
   ``{"suite": ..., "task": ..., "seed": ...}``).
-- ``mcp_servers`` — optional tuple of MCP servers this robot contributes
-  (for example, parsed from a robot config file's ``mcp_servers`` section with
-  :func:`~rpent.utils.mcp_servers.parse_mcp_servers`). The CLI merges in
-  servers from ``--mcp-config`` and ``get_toolkit`` registers them on the
-  robot's ``Toolkit``. Server names must be unique across both sources. See
-  :ref:`external-mcp-servers`.
+- ``mcp_servers`` — optional tuple of robot-owned MCP servers (parsed with
+  :func:`~rpent.utils.mcp_servers.parse_mcp_servers`), merged at runtime with
+  the YAML file path passed to ``--mcp-config``; see :ref:`external-mcp-servers`.
 
 .. code-block:: python
 

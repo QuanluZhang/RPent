@@ -65,7 +65,7 @@ Memory 设计
 模型
 ~~~~~~~~~~~~
 
-- **规划器与模型**\ ：支持 Codex、Claude Code 和 RPent 内置规划器，可接入 Claude、GPT、Qwen 等模型，并按规划器配置推理强度、规划轮数上限和超时时间。在 LIBERO、RoboCasa365 和 RoboTwin 中，规划器还可直接输出动作控制数值，由环境执行。 :doc:`配置指南 </rst_source/guides/configure_planner>` ｜ :ref:`直接执行动作 <planner-direct-actions>`
+- **规划器与模型**\ ：支持 Codex、Claude Code 和 RPent 内置规划器，可接入 Claude、GPT、Qwen 等模型，并按规划器配置推理强度、规划轮数上限和超时时间。在 LIBERO、RoboCasa365 和 RoboTwin 中，规划器还可直接输出动作控制数值，由环境执行。 :doc:`配置指南 </rst_source/guides/configure_planner>`
 
 - **VLA 模型**\ ：支持 Pi0.5（LIBERO、RoboDojo、双臂 Franka、YAM）、RLDX-1（RoboCasa365）和 LingBot-VLA（RoboTwin）。 :doc:`Pi0.5 </rst_source/simulators/libero>` ｜ :doc:`RLDX-1 </rst_source/simulators/robocasa>` ｜ :doc:`LingBot-VLA </rst_source/simulators/robotwin>`
 

@@ -3,7 +3,9 @@
 External MCP Tools
 ==================
 
-Connect a Streamable HTTP MCP server to an RPent run with ``--mcp-config`` so the planner can call external sensors, lab instruments, or facility services alongside robot primitives. The same configuration works across ``api``, ``claude_code``, ``codex``, and ``gemini_cli``.
+Connect a Streamable HTTP MCP server to an RPent run by passing a YAML file path to ``--mcp-config`` so the planner can call external sensors, lab instruments, or facility services alongside robot primitives. The same configuration works across ``api``, ``claude_code``, ``codex``, and ``gemini_cli``.
+
+This guide first walks through a minimal local power-meter example, then covers YAML fields and authentication, robot-action synchronization, and naming, timeout, and session limits.
 
 Prerequisites:
 
@@ -12,6 +14,8 @@ Prerequisites:
 
 Quick Start
 -----------
+
+This walkthrough starts a local mock power-meter MCP server exposing one ``read_power_meter`` tool, connects it to RPent through ``--mcp-config power.yaml``, and shows how to confirm the planner can call it during a run.
 
 1. Start a local test server. Save the script below as ``power_meter.py``:
 
@@ -33,7 +37,7 @@ Quick Start
          if __name__ == "__main__":
              mcp.run(transport="streamable-http")
 
-   ``mcp`` is included with RPent. Start the server (it listens at ``http://127.0.0.1:8765/mcp``):
+   Start the server (it listens at ``http://127.0.0.1:8765/mcp``):
 
    .. code-block:: bash
 
@@ -47,7 +51,7 @@ Quick Start
         power:
           url: http://127.0.0.1:8765/mcp
 
-3. Pass ``--mcp-config`` to any robot run (replace ``--robot libero`` and ``--planner claude_code`` with your target robot and online planner):
+3. Pass the YAML file path via ``--mcp-config`` to any robot run (replace ``--robot libero`` and ``--planner claude_code`` with your target robot and online planner):
 
    .. code-block:: bash
 
@@ -80,8 +84,11 @@ Each entry under ``mcp_servers`` uses the following fields:
    * - ``sync_with_robot``
      - No
      - ``false`` (default) or ``true``. Controls whether calls serialize with robot actions and capture a fresh robot observation (see below).
+   * - ``timeout_s``
+     - No
+     - Positive per-request timeout in seconds for discovery and tool calls. Overrides ``MCP_CALL_TIMEOUT_S`` and the 60-second default.
 
-For an authenticated server exposing a subset of its tools:
+For an authenticated server exposing a subset of its tools with a custom timeout:
 
 .. code-block:: yaml
 
@@ -89,6 +96,7 @@ For an authenticated server exposing a subset of its tools:
      power:
        url: https://power.example.com/mcp
        tools: [read_power_meter]
+       timeout_s: 30
        headers:
          Authorization: "Bearer ${oc.env:POWER_API_TOKEN}"
 
@@ -120,7 +128,7 @@ If one server exposes both read-only tools and synchronized device actions, decl
 Reference Details
 -----------------
 
-External tools are exposed as ``<server>__<tool>``, time out after 60 seconds by default (override with ``MCP_CALL_TIMEOUT_S``), and inherit RPent's cancellation and trajectory capture. Expand the sections below for naming rules, session behavior, allowlist guidance, and credential redaction.
+External tools are exposed as ``<server>__<tool>``, time out after ``timeout_s`` (or ``MCP_CALL_TIMEOUT_S``, defaulting to 60 seconds), and inherit RPent's cancellation and trajectory capture. Expand the sections below for naming rules, config merging, session behavior, allowlist guidance, and credential redaction.
 
 .. dropdown:: Tool naming and planner prefixes
 
@@ -128,11 +136,12 @@ External tools are exposed as ``<server>__<tool>``, time out after 60 seconds by
    - Planner adapters apply their normal toolkit namespace on top: ``api`` uses ``power__read_power_meter``, ``claude_code`` and ``codex`` use ``mcp__rpent__power__read_power_meter``, and ``gemini_cli`` uses ``mcp_rpent_power__read_power_meter``.
    - Server names must start with a letter or digit, contain only letters, digits, ``_``, or ``-``, omit ``__`` and trailing ``_``, and not be ``rpent``.
 
-.. dropdown:: Validation, sessions, timeouts, content limits, and redaction
+.. dropdown:: Config merging, validation, sessions, timeouts, content limits, and redaction
 
+   - **Merging shared and robot configs:** The CLI merges servers from the ``--mcp-config`` YAML file with any robot-owned servers declared on ``RunConfig.mcp_servers`` (parsed from a robot's own config via :func:`~rpent.utils.mcp_servers.parse_mcp_servers`). Server names must be unique across both sources; duplicate names fail startup.
    - **Startup validation and tool allowlisting:** During toolkit initialization, RPent contacts each server and checks that every tool named in ``tools`` exists. Unreachable servers or unknown tool names fail startup with the list of tools the server does expose. Omitting ``tools`` (or setting ``tools: "*"``) exposes and auto-approves every tool on the server across all planners; list explicit tool names in ``tools`` when the server includes side-effecting or administrative tools.
    - **Stateless sessions and static discovery:** Each call opens a fresh stateless MCP session, so session-scoped server state is not preserved across calls. Only MCP tools discovered at startup are exposed; MCP Resources, Prompts, and dynamic ``tools/list_changed`` updates are not forwarded.
-   - **Timeouts and cancellation:** Every MCP request times out after 60 seconds by default; set ``MCP_CALL_TIMEOUT_S`` (in seconds) to override it. Cancelling a run or Dashboard task interrupts in-flight MCP calls immediately without waiting for the remote server to finish.
+   - **Timeouts and cancellation:** Per-server ``timeout_s`` in YAML takes precedence, followed by the ``MCP_CALL_TIMEOUT_S`` environment variable (in seconds), then the 60-second default. Cancelling a run or Dashboard task interrupts in-flight MCP calls immediately without waiting for the remote server to finish.
    - **Content types:** Text, structured JSON, and ``image/png`` blocks are forwarded to the model and bounded to RPent's tool-text limit. Other media or resource blocks include metadata only, and ``--no-images`` (``api`` only) omits external PNG blocks as well.
    - **Credential handling and redaction:** Header values stay inside the RPent process and are never passed on child-process command lines. Task records redact header values as well as URL query strings and fragments.
 
